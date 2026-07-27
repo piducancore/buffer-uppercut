@@ -1,0 +1,21 @@
+[vendor]
+name = "PiducanCore"
+id = "com.piducancore"
+url = "https://github.com/piducancore/buffer-uppercut-truce"
+au_manufacturer = "Pidu"
+
+[[plugin]]
+name = "Buffer Uppercut TRUCE Preview"
+bundle_id = "buffer-uppercut-truce-preview"
+crate = "buffer-uppercut-truce"
+category = "effect"
+fourcc = "BUTr"
+au_tag = "Effects"
+midi_input = true
+# VST3 secondary subcategory — drives the Cubase plugin submenu.
+# Tighten to your effect kind: "Delay", "Distortion", "Dynamics",
+# "EQ", "Filter", "Mastering", "Modulation", "Pitch Shift",
+# "Reverb", "Surround", "Analyzer", "Spatial". Leave as "Tools" for
+# generic utilities. Without this, Cubase buckets the plugin under
+# "Other".
+vst3_subcategory = "Delay"
