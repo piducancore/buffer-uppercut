@@ -3,6 +3,10 @@ name = "buffer-uppercut-truce"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [".", "dsp"]
+resolver = "3"
+
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
@@ -29,6 +33,7 @@ shell = ["truce/shell"]
 rt-paranoid = ["truce/rt-paranoid"]
 
 [dependencies]
+buffer-uppercut-dsp = { path = "dsp" }
 truce = { version = "6.3" }
 truce-egui = { version = "6.3" }
 egui = "0.34"

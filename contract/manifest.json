@@ -1,0 +1,95 @@
+{
+  "contract": "dsp-contract-v1",
+  "reference_commit": "bc17659aa517b9910761c1861cadd873402b75de",
+  "reference_engine": "plugins/BufferUppercut/BufferUppercutEngine.h",
+  "fixture_format": "BUDSP_CONTRACT tab-separated text version 1",
+  "canonical_precision": "IEEE-754 binary64",
+  "comparison": {
+    "absolute_tolerance": 1e-07,
+    "relative_tolerance": 1e-07,
+    "finite_outputs_required": true
+  },
+  "event_timing": "State changes apply at block boundaries",
+  "fixtures": [
+    {
+      "path": "00-dry-stereo-variable-blocks.budsp",
+      "sha256": "df5e422686b54025e5b27c471df926899da6ac19e2a92f3d533e5b06a357dee0"
+    },
+    {
+      "path": "01-dry-mono.budsp",
+      "sha256": "284180e5f7a3d1225a6fe4a18c32977b82cc9f625a28ddd009c5af6b777f02f9"
+    },
+    {
+      "path": "02-default-effect-0-off.budsp",
+      "sha256": "4ee1701eea79d94d687f18d34b7677a50a84d22498be1953bc65992d8a0fedbc"
+    },
+    {
+      "path": "03-default-effect-1-beat-repeat.budsp",
+      "sha256": "0fd91badea83140fc7022f6c6143da49eb0f540c9e70acb4f4222cdedf0fa621"
+    },
+    {
+      "path": "04-default-effect-2-reverse.budsp",
+      "sha256": "efc8f042a8c1625d3f75b861e0cb8fe335826e5c2290250729e578b4c959b0a8"
+    },
+    {
+      "path": "05-default-effect-3-tape-stop.budsp",
+      "sha256": "f2edbade7e6374127ddafc822161f6e5babeebd5c9136ec6148bb98870aa7c9e"
+    },
+    {
+      "path": "06-default-effect-4-gate.budsp",
+      "sha256": "3e031bdd1884051333210844af88211e32c2c09ead0cbce094acbbd7b7b99677"
+    },
+    {
+      "path": "07-default-effect-5-pitch-down.budsp",
+      "sha256": "a51c5233ceb03eea11bce47a566bbee1ff900e981a2f5eddf229420527f02ea2"
+    },
+    {
+      "path": "08-default-effect-6-pitch-reset.budsp",
+      "sha256": "46a170872c70d593b073f20c918be37db3bb8db2f0baee358e6a0cc7f83a2cc6"
+    },
+    {
+      "path": "09-default-effect-7-pitch-up.budsp",
+      "sha256": "0fc8c5f9a6f9754386aed7b5c55de1c30fbf4bd7035e9112909664df54b4a33b"
+    },
+    {
+      "path": "10-default-effect-8-band-low.budsp",
+      "sha256": "f3ad5ee01537a5ce203cc6d0f0d3d75590ec7c2791ee4a2aad5dc7fb8ad1a106"
+    },
+    {
+      "path": "11-default-effect-9-band-mid.budsp",
+      "sha256": "fd210dbafef9bf8878a2dd0ecb5752b8c6bad8dd71084f56f9b73d6a6a064f44"
+    },
+    {
+      "path": "12-default-effect-10-band-high.budsp",
+      "sha256": "bdff5ecca8eb4df96433d08a91c91847d001391c79e7104cd21a6d4e2e3ac359"
+    },
+    {
+      "path": "13-default-effect-11-lofi.budsp",
+      "sha256": "996762178e4f64a4b93de838fb39bdf00201383f3fc39b5455539c3b803ad7a1"
+    },
+    {
+      "path": "14-buffer-macro-extremes-tempo-pitch.budsp",
+      "sha256": "2455040468671b715de973355d12645a0d188e987fe3b8386c7456d46b0a0710"
+    },
+    {
+      "path": "15-buffer-priority-and-restore.budsp",
+      "sha256": "b64b13104a81c5290314be474dcf55c082560f37b49e580e29796004d791535c"
+    },
+    {
+      "path": "16-layered-bands-lofi-gate.budsp",
+      "sha256": "2203945b9d012cdfc72d8965c2b0e7f00804f742031b01188cde8ca95b29dab4"
+    },
+    {
+      "path": "17-deterministic-jitter-a.budsp",
+      "sha256": "fadc0b821f7ab934d29e01938116f22ecb9b4d39328fdf0ca56897c382984142"
+    },
+    {
+      "path": "18-deterministic-jitter-after-reset.budsp",
+      "sha256": "e74b2349ba1d035f61dbb348a10fe051df9ab7bfdbd8fed5a07cbdfe9b0cfe2f"
+    },
+    {
+      "path": "pitch-actions.budsp",
+      "sha256": "87e4ced193df601e5b042cb2f2cb7cec2825cb448a0044deb354eec432c11a1b"
+    }
+  ]
+}

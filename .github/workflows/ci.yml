@@ -1,20 +1,102 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  macos:
-    runs-on: macos-14
+  format:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  test-and-build:
+    name: Test and build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-2022
+          - macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo install cargo-truce --version 6.3.0 --locked
-      - run: cargo fmt --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: cargo test
-      - run: cargo truce build --clap --vst3
+
+      - name: Install Linux native-audio and window dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev
+
+      - name: Install TRUCE build tool
+        run: cargo install cargo-truce --version 6.3.0 --locked
+
+      - name: Lint all targets
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run wrapper, DSP, and pinned-contract tests
+        run: cargo test --locked --workspace
+
+      - name: Verify pinned fixture checksums
+        run: |
+          if command -v sha256sum >/dev/null; then
+            (cd contract && sha256sum -c SHA256SUMS)
+          else
+            (cd contract && shasum -a 256 -c SHA256SUMS)
+          fi
+
+      - name: Check audio-thread allocations
+        run: cargo test --locked --workspace --features rt-paranoid
+
+      - name: Build CLAP, VST3, and standalone artifacts
+        run: |
+          cargo truce build --clap --vst3
+          cargo build --locked --release --bin buffer-uppercut-truce-standalone
+
+      - name: Install clap-validator
+        run: cargo install --git https://github.com/free-audio/clap-validator --locked
+
+      - name: Install pluginval 1.0.4
+        run: |
+          case "$RUNNER_OS" in
+            Linux) asset=pluginval_Linux.zip ;;
+            macOS) asset=pluginval_macOS.zip ;;
+            Windows) asset=pluginval_Windows.zip ;;
+          esac
+          mkdir -p target/tools/pluginval
+          curl --fail --location --retry 3 \
+            "https://github.com/Tracktion/pluginval/releases/download/v1.0.4/$asset" \
+            --output target/tools/pluginval.zip
+          unzip -q target/tools/pluginval.zip -d target/tools/pluginval
+          pluginval="$(find target/tools/pluginval -type f \( -name pluginval -o -name pluginval.exe \) -print -quit)"
+          test -n "$pluginval"
+          chmod +x "$pluginval"
+          dirname "$pluginval" >> "$GITHUB_PATH"
+
+      - name: Validate CLAP and VST3 artifacts
+        run: |
+          cargo truce install --clap --vst3 --no-build
+          cargo truce validate --clap --pluginval --skip-gui-tests
+
+      - name: Publish deterministic DSP benchmark
+        if: runner.os == 'macOS'
+        run: cargo run --locked -p buffer-uppercut-dsp --release --example benchmark

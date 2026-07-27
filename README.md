@@ -14,7 +14,10 @@ evaluated at the same milestone.
 - native egui editor
 - host-managed parameter state
 - CLAP, VST3, and standalone targets
-- intentional pass-through DSP
+- independent, framework-free `f64` DSP core
+- beat repeat, reverse, tape stop, gate, pitch actions, three bands, and LoFi
+- pinned C++ behavior fixtures with `1e-7` absolute/relative tolerance
+- allocation-free processing after activation/reset
 
 The plugin has unique preview metadata, so it can be installed beside the
 WRAC preview without replacing it.
@@ -69,6 +72,7 @@ binaries for their whole process lifetime. Look for
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
+cargo test --features rt-paranoid
 cargo truce build --clap --vst3
 ```
 
@@ -87,10 +91,18 @@ real-time rules, validation flow, and how to add another export format.
 See [docs/COMPARISON.md](docs/COMPARISON.md) for the controlled WRAC/TRUCE
 comparison.
 
-## Scope boundary
+## DSP contract
 
-This is a wrapper/UI comparison, not yet a completed product port. The next
-shared milestone is to move the framework-light Buffer Uppercut DSP engine
-behind both wrappers and run identical audio fixtures. Parameter-state data is
-native to each framework today; cross-framework preset migration is not yet
-implemented.
+The local `buffer-uppercut-dsp` crate is an independent Rust port. Its
+integration tests consume the vendored `contract/` snapshot from C++ commit
+`bc17659aa517b9910761c1861cadd873402b75de`. Verify the snapshot and render
+fixtures with:
+
+```sh
+(cd contract && shasum -a 256 -c SHA256SUMS)
+cargo test -p buffer-uppercut-dsp --test contract
+```
+
+See [contract/PINNED.md](contract/PINNED.md) before updating fixtures.
+Parameter-state data remains native to each framework; cross-framework preset
+migration and kit import/export are not part of this milestone.

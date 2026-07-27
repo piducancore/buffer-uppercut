@@ -12,7 +12,9 @@ milestone.
 | Formats in preview | CLAP, VST3, standalone | CLAP, VST3, standalone |
 | MIDI and transport | wired | wired |
 | State | host parameter state | host parameter state |
-| DSP at this milestone | pass-through | pass-through |
+| DSP at this milestone | independent Rust port | independent Rust port |
+| Canonical precision | `f64` core | `PluginLogic64` + `f64` core |
+| Behavior oracle | pinned C++ fixtures | pinned C++ fixtures |
 
 ## What to measure
 
@@ -38,12 +40,14 @@ egui brings a GPU rendering stack, and native-window behavior still needs host
 testing. The comparison should be decided after the same DSP engine and audio
 fixtures run behind both wrappers.
 
-## Fair next milestone
+## DSP parity milestone
 
-1. extract or port the same framework-light DSP engine into each repository
-2. feed identical deterministic audio/MIDI/transport fixtures
-3. compare rendered audio within an agreed tolerance
-4. test state migration by stable parameter ID
-5. validate both builds in the same DAWs
+Both implementations must independently consume the same frozen C++ corpus.
+Passing means finite audio within `1e-7` absolute-or-relative tolerance, all
+145 parameter IDs retained, identical note mappings, and no process-time
+allocation. Neither Rust implementation is an oracle or source-code dependency
+for the other.
 
-Avoid evaluating DSP quality until that milestone is complete.
+The remaining comparison work is controlled performance measurement, matching
+validator runs, and the same DAW smoke checklist. Cross-framework preset-byte
+migration and GUI parity remain separate milestones.

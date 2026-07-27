@@ -201,9 +201,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "buffer-uppercut-dsp"
+version = "0.1.0"
+
+[[package]]
 name = "buffer-uppercut-truce"
 version = "0.1.0"
 dependencies = [
+ "buffer-uppercut-dsp",
  "clap-sys",
  "egui",
  "truce",

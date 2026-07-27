@@ -48,7 +48,7 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                 ui.add_space(10.0);
                 ui.label(
                     RichText::new(
-                        "Comparison build · pass-through DSP · parameters, MIDI, state and host transport are live",
+                        "Independent f64 DSP port · parameters, MIDI, state and host transport are live",
                     )
                     .small()
                     .color(Color32::from_gray(150)),

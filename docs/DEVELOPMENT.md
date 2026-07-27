@@ -4,17 +4,23 @@
 
 | File | Responsibility |
 | --- | --- |
-| `src/lib.rs` | TRUCE plugin logic, process callback, pass-through audio |
+| `src/lib.rs` | TRUCE `f64` wrapper, parameter/MIDI aggregation, preallocated I/O |
 | `src/params.rs` | Stable 145-parameter contract and defaults |
 | `src/midi.rs` | Framework-light MIDI note-to-pad mapping |
 | `src/editor.rs` | Native egui layout and parameter bindings |
 | `src/main.rs` | Standalone application entry point |
+| `dsp/src/lib.rs` | Independent, framework-free Buffer Uppercut DSP core |
+| `contract/` | Pinned C++ fixture corpus and checksums |
 | `truce.toml` | Plugin identity, category, MIDI wiring, format metadata |
 | `Cargo.toml` | Format features and dependencies |
 
-Keep audio-thread code allocation-free. GUI code belongs in `editor.rs`;
-format-specific metadata belongs in `truce.toml`. The eventual Buffer Uppercut
-DSP engine should be a framework-light module called only from `process`.
+Keep audio-thread code allocation-free. `reset` owns ring-buffer and block
+scratch allocation. GUI code belongs in `editor.rs`; format-specific metadata
+belongs in `truce.toml`. The DSP crate must not depend on TRUCE or either Rust
+comparison implementation.
+
+TRUCE uses `PluginLogic64`. Format wrappers widen/narrow host buffers at their
+boundary, while this plugin and its DSP fixtures remain planar `f64`.
 
 ## Parameter compatibility
 
@@ -64,6 +70,41 @@ For allocation checks:
 cargo test --features rt-paranoid
 ```
 
+`cargo test` is workspace-wide: it runs wrapper tests, DSP unit tests, all 19
+processing fixtures, and the pitch-action fixture. `rt-paranoid` enables
+TRUCE's audio-thread allocation detector. Any allocation reported from
+`process` is a blocking failure.
+
+## DSP contract workflow
+
+The canonical snapshot is `contract/dsp-contract-v1`, represented locally by
+the files in `contract/`. It is pinned to C++ commit
+`bc17659aa517b9910761c1861cadd873402b75de`; the manifest SHA-256 is recorded in
+`contract/PINNED.md`.
+
+```sh
+(cd contract && shasum -a 256 -c SHA256SUMS)
+cargo test -p buffer-uppercut-dsp --test contract
+```
+
+To sync a new contract, first create and review a new version in the C++ repo.
+Copy its complete directory, update `contract/PINNED.md`, and run the entire
+workspace suite. Never edit expected samples locally. Intentional behavior
+changes need a versioned contract and deviation-ledger entry.
+
+## Performance
+
+Run the deterministic release benchmark:
+
+```sh
+cargo run -p buffer-uppercut-dsp --release --example benchmark
+```
+
+Record the reported nanoseconds per stereo frame with the machine, OS, CPU,
+Rust version, and C++ reference result from the same machine. Compare medians
+from at least five runs. A Rust median more than 25% slower than the pinned C++
+engine blocks milestone sign-off unless explicitly accepted.
+
 ## Build and install variants
 
 TRUCE format flags select independent wrappers:
@@ -107,11 +148,12 @@ Re-run the shell install command after changes to rebuild the logic library.
 2. `cargo clippy --all-targets --all-features -- -D warnings`
 3. `cargo test`
 4. `cargo test --features rt-paranoid`
-5. build every advertised format
-6. run available validators
-7. install and rescan in a DAW
-8. verify automation names/IDs and state recall
-9. verify MIDI on all accepted notes and channels
-10. verify mono/stereo layouts and host tempo changes
+5. `cargo run -p buffer-uppercut-dsp --release --example benchmark`
+6. build every advertised format
+7. run available CLAP/VST3 validators
+8. install and rescan in a DAW
+9. verify automation names/IDs and state recall
+10. verify MIDI on all accepted notes and channels
+11. verify every effect, mono/stereo layouts, and host tempo changes
 
 Build products, installed bundles, and caches stay out of git.
