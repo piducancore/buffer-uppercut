@@ -87,6 +87,13 @@ impl Default for PerformanceState {
     }
 }
 
+impl PerformanceState {
+    #[must_use]
+    pub fn classic() -> Self {
+        classic_state()
+    }
+}
+
 #[must_use]
 pub fn clamp_macro(value: f64) -> f64 {
     if value.is_finite() {
@@ -411,6 +418,13 @@ impl Default for Engine {
 }
 
 impl Engine {
+    #[must_use]
+    pub fn new(sample_rate: f64) -> Self {
+        let mut engine = Self::default();
+        engine.reset(sample_rate);
+        engine
+    }
+
     pub fn reset(&mut self, sample_rate: f64) {
         self.sample_rate = sample_rate.max(1.0);
         let required = (self.sample_rate * 16.0) as usize;
@@ -554,6 +568,11 @@ impl Engine {
     #[must_use]
     pub const fn play_rate(&self) -> f64 {
         self.play_rate
+    }
+
+    #[must_use]
+    pub const fn history_bytes(&self) -> usize {
+        self.buffer_l.len() * 2 * std::mem::size_of::<f64>()
     }
 
     fn update_press_order(&mut self, state: &PerformanceState) {
