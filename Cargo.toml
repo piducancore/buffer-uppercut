@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [".", "dsp"]
+members = [".", "dsp", "vendor/truce-egui"]
+exclude = ["vendor/truce-clap"]
 resolver = "3"
 
 [lib]
@@ -42,11 +43,11 @@ truce-vst3 = { version = "6.3", optional = true }
 truce-standalone = { version = "6.3", features = ["gui"], optional = true }
 clap-sys = { version = "0.5", optional = true }
 
-# TRUCE 6.3.0 restores CLAP parameter values correctly but does not notify
-# the host to rescan them after state/preset loads. This exact-version
-# backport adds that notification; see vendor/truce-clap/PATCH.md.
+# Narrow exact-version wrapper backports. Remove each override after the
+# corresponding behavior ships upstream; see the PATCH.md in each directory.
 [patch.crates-io]
 truce-clap = { path = "vendor/truce-clap" }
+truce-egui = { path = "vendor/truce-egui" }
 
 # Custom profile for `cargo truce install --shell`. The shell-mode
 # build (`cargo build --profile shell --features ...,shell`) lands the

@@ -53,6 +53,13 @@ Use MIDI note numbers in product-facing text because host octave labels vary.
 
 MIDI state is held independently for all 16 channels.
 
+In REAPER, open **View → Virtual MIDI Keyboard**, route the track input from
+the virtual keyboard, arm/monitor the track, and enable **Send all keyboard
+input** when typing while another window is active. The local `truce-egui`
+backport returns keyboard events to the parent DAW whenever no text editor is
+focused, allowing REAPER's computer keyboard to continue generating MIDI while
+the plugin editor is open. See `vendor/truce-egui/PATCH.md`.
+
 Pitch pads update the internal performance pitch at the aggregate
 released-to-held transition and emit a host parameter-change event. Audio code
 must not mutate the host-owned parameter store directly; this preserves CLAP
