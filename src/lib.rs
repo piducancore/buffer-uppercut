@@ -78,16 +78,24 @@ impl PluginLogic for BufferUppercutTruce {
         }
 
         let mut performance = performance_state(params, &state.held_pads_by_channel);
+        let pitch_before_actions = state.performance_pitch;
         for pad in 0..NUM_PADS {
             if performance.held[pad] && !state.previous_held[pad] {
                 let config = &performance.pads[pad];
                 if config.effect_type.is_pitch_action() {
                     state.performance_pitch =
                         apply_pitch_action(state.performance_pitch, config.effect_type, config);
-                    state.last_parameter_pitch = state.performance_pitch;
-                    params.set_plain(params::PARAM_PERFORMANCE_PITCH_ID, state.performance_pitch);
                 }
             }
+        }
+        if state.performance_pitch != pitch_before_actions {
+            context.output_events.push(Event::new(
+                0,
+                EventBody::ParamChange {
+                    id: params::PARAM_PERFORMANCE_PITCH_ID,
+                    value: state.performance_pitch,
+                },
+            ));
         }
         state.previous_held = performance.held;
         performance.performance_pitch = state.performance_pitch;
@@ -120,6 +128,8 @@ impl PluginLogic for BufferUppercutTruce {
             state.last_tempo,
             &performance,
         );
+        zero_subnormals(&mut state.output_l[..frames]);
+        zero_subnormals(&mut state.output_r[..frames]);
         {
             let (_, output) = buffer.io(0);
             output.copy_from_slice(&state.output_l[..frames]);
@@ -132,8 +142,25 @@ impl PluginLogic for BufferUppercutTruce {
         ProcessStatus::Normal
     }
 
+    fn state_changed(state: &mut Self::DspState, params: &Self::Params) {
+        let restored_pitch = params
+            .get_plain(params::PARAM_PERFORMANCE_PITCH_ID)
+            .unwrap_or_default()
+            .clamp(-24.0, 24.0);
+        state.performance_pitch = restored_pitch;
+        state.last_parameter_pitch = restored_pitch;
+    }
+
     fn editor(params: Arc<Self::Params>) -> Box<dyn Editor> {
         editor::create(params)
+    }
+}
+
+fn zero_subnormals(samples: &mut [f64]) {
+    for sample in samples {
+        if sample.abs() < f64::from(f32::MIN_POSITIVE) {
+            *sample = 0.0;
+        }
     }
 }
 
@@ -255,7 +282,7 @@ mod tests {
         let mut output_l = [0.0; 32];
         let mut output_r = [0.0; 32];
         let transport = TransportInfo::for_screenshot();
-        let mut output_events = EventList::with_capacity(0);
+        let mut output_events = EventList::with_capacity(1);
         let mut events = EventList::with_capacity(1);
         events.push(Event::new(
             0,
@@ -281,9 +308,41 @@ mod tests {
             );
             assert_eq!(
                 params.get_plain(params::PARAM_PERFORMANCE_PITCH_ID),
-                Some(-1.0),
+                Some(0.0),
                 "iteration {iteration}"
             );
+            assert_eq!(state.performance_pitch, -1.0, "iteration {iteration}");
         }
+        assert_eq!(output_events.len(), 1);
+        assert!(matches!(
+            output_events.get(0).map(|event| &event.body),
+            Some(EventBody::ParamChange { id, value })
+                if *id == params::PARAM_PERFORMANCE_PITCH_ID && *value == -1.0
+        ));
+    }
+
+    #[test]
+    fn restored_parameter_resynchronizes_internal_performance_pitch() {
+        let params = BufferUppercutParams::default();
+        params.set_plain(params::PARAM_PERFORMANCE_PITCH_ID, -7.0);
+        let mut state = BufferUppercutTruce {
+            performance_pitch: 3.0,
+            last_parameter_pitch: 3.0,
+            ..BufferUppercutTruce::default()
+        };
+        <BufferUppercutTruce as PluginLogic>::state_changed(&mut state, &params);
+        assert_eq!(state.performance_pitch, -7.0);
+        assert_eq!(state.last_parameter_pitch, -7.0);
+    }
+
+    #[test]
+    fn subnormal_output_samples_are_flushed() {
+        let mut samples = [
+            f64::from(f32::MIN_POSITIVE) / 2.0,
+            -f64::from(f32::MIN_POSITIVE) / 4.0,
+            1.0,
+        ];
+        zero_subnormals(&mut samples);
+        assert_eq!(samples, [0.0, 0.0, 1.0]);
     }
 }

@@ -13,6 +13,7 @@
 | `contract/` | Pinned C++ fixture corpus and checksums |
 | `truce.toml` | Plugin identity, category, MIDI wiring, format metadata |
 | `Cargo.toml` | Format features and dependencies |
+| `vendor/truce-clap/` | Exact TRUCE 6.3.0 CLAP wrapper plus documented state-rescan backport |
 
 Keep audio-thread code allocation-free. `reset` owns ring-buffer and block
 scratch allocation. GUI code belongs in `editor.rs`; format-specific metadata
@@ -21,6 +22,11 @@ comparison implementation.
 
 TRUCE uses `PluginLogic64`. Format wrappers widen/narrow host buffers at their
 boundary, while this plugin and its DSP fixtures remain planar `f64`.
+
+The local `truce-clap` patch makes state and preset loads notify the CLAP host
+that parameter values changed. Keep the patch version-locked, and remove it
+when an upstream TRUCE release includes equivalent behavior. The patch's
+provenance and removal condition are recorded in `vendor/truce-clap/PATCH.md`.
 
 ## Parameter compatibility
 
@@ -46,6 +52,13 @@ Use MIDI note numbers in product-facing text because host octave labels vary.
 | 81–83 | octave-above aliases for pitch pads 10–12 |
 
 MIDI state is held independently for all 16 channels.
+
+Pitch pads update the internal performance pitch at the aggregate
+released-to-held transition and emit a host parameter-change event. Audio code
+must not mutate the host-owned parameter store directly; this preserves CLAP
+process/flush equivalence and lets every wrapper record the change correctly.
+Wrapper outputs are also normalized by flushing samples below the `f32` normal
+range to zero before they cross either format boundary.
 
 ## Normal development loop
 
