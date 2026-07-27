@@ -95,7 +95,15 @@ jobs:
       - name: Validate CLAP and VST3 artifacts
         run: |
           cargo truce install --clap --vst3 --no-build
-          cargo truce validate --clap --pluginval --skip-gui-tests
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            # cargo-truce 6.3.0 forwards a removed --test-filter option to
+            # current clap-validator builds on Windows. Run each validator
+            # explicitly until the build tool is updated.
+            cargo truce validate --pluginval --skip-gui-tests
+            clap-validator validate "target/bundles/Buffer Uppercut TRUCE Preview.clap"
+          else
+            cargo truce validate --clap --pluginval --skip-gui-tests
+          fi
 
       - name: Publish deterministic DSP benchmark
         if: runner.os == 'macOS'
