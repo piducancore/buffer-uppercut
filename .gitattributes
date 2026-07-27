@@ -1,2 +1,3 @@
 *.budsp text eol=lf
 contract/manifest.json text eol=lf
+contract/SHA256SUMS text eol=lf
