@@ -51,6 +51,7 @@ impl PluginLogic for BufferUppercutTruce {
         state.output_r.resize(config.max_block_size, 0.0);
         state.held_pads_by_channel = [0; 16];
         state.previous_held = [false; NUM_PADS];
+        params.set_midi_held_pad_bits(0);
         state.performance_pitch = params
             .get_plain(params::PARAM_PERFORMANCE_PITCH_ID)
             .unwrap_or_default()
@@ -66,7 +67,10 @@ impl PluginLogic for BufferUppercutTruce {
         context: &mut ProcessContext,
     ) -> ProcessStatus {
         state.last_tempo = context.transport.tempo.max(1.0);
-        midi::apply_events(&mut state.held_pads_by_channel, events);
+        if let Some(pad) = midi::apply_events(&mut state.held_pads_by_channel, events) {
+            params.record_midi_pad_press(pad);
+        }
+        params.set_midi_held_pad_bits(aggregate_midi_held(&state.held_pads_by_channel));
 
         let parameter_pitch = params
             .get_plain(params::PARAM_PERFORMANCE_PITCH_ID)
@@ -168,10 +172,7 @@ fn performance_state(
     params: &BufferUppercutParams,
     held_pads_by_channel: &[u16; 16],
 ) -> PerformanceState {
-    let midi_held = held_pads_by_channel
-        .iter()
-        .copied()
-        .fold(0_u16, |all, channel| all | channel);
+    let midi_held = aggregate_midi_held(held_pads_by_channel);
     let mut state = PerformanceState::default();
     for pad in 0..NUM_PADS {
         let effect_index = params
@@ -195,6 +196,13 @@ fn performance_state(
         state.held[pad] = trigger || (midi_held & (1_u16 << pad)) != 0;
     }
     state
+}
+
+fn aggregate_midi_held(held_pads_by_channel: &[u16; 16]) -> u16 {
+    held_pads_by_channel
+        .iter()
+        .copied()
+        .fold(0_u16, |all, channel| all | channel)
 }
 
 truce::plugin! {
@@ -227,6 +235,14 @@ mod tests {
         let state = performance_state(&params, &midi);
         assert!(state.held[2]);
         assert!(state.held[7]);
+    }
+
+    #[test]
+    fn midi_ui_mask_aggregates_all_channels() {
+        let mut midi = [0_u16; 16];
+        midi[0] = 1 << 2;
+        midi[15] = 1 << 11;
+        assert_eq!(aggregate_midi_held(&midi), (1 << 2) | (1 << 11));
     }
 
     #[test]

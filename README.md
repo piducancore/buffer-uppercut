@@ -10,6 +10,8 @@ evaluated at the same milestone.
   defaults as the WRAC preview
 - MIDI notes 60–75 mapped to the 16 performance pads
 - octave aliases for pitch notes 69–71
+- MIDI pad illumination and optional pad auto-selection
+- effect-aware macro labels and semantic values, with unused controls disabled
 - host tempo/transport access
 - native egui editor
 - host-managed parameter state

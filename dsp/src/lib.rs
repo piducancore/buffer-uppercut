@@ -53,6 +53,47 @@ impl EffectType {
     pub const fn is_pitch_action(self) -> bool {
         matches!(self, Self::PitchDown | Self::PitchReset | Self::PitchUp)
     }
+
+    #[must_use]
+    pub const fn active_control_count(self) -> usize {
+        match self {
+            Self::Off => 0,
+            Self::Gate => 6,
+            Self::PitchDown | Self::PitchReset | Self::PitchUp => 1,
+            Self::BandLow | Self::BandHigh => 2,
+            Self::BandMid | Self::LoFi => 3,
+            Self::BeatRepeat | Self::Reverse | Self::TapeStop => NUM_MACROS,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_control_enabled(self, control: usize) -> bool {
+        control < self.active_control_count()
+    }
+
+    #[must_use]
+    pub const fn control_name(self, control: usize) -> &'static str {
+        if control >= NUM_MACROS {
+            return "";
+        }
+
+        match self {
+            Self::Off => "",
+            Self::BeatRepeat => [
+                "CELL", "LOOKBACK", "WET", "MODE", "PITCH", "DECAY", "JITTER",
+            ][control],
+            Self::Reverse => [
+                "LENGTH", "WET", "MODE", "PITCH", "DECAY", "OFFSET", "JITTER",
+            ][control],
+            Self::TapeStop => ["TIME", "CURVE", "START", "WET", "MODE", "OFFSET", "FADE"][control],
+            Self::Gate => ["GRID", "DUTY", "DEPTH", "ATTACK", "RELEASE", "PHASE", ""][control],
+            Self::PitchDown | Self::PitchUp => ["STEP", "", "", "", "", "", ""][control],
+            Self::PitchReset => ["TARGET", "", "", "", "", "", ""][control],
+            Self::BandLow | Self::BandHigh => ["CUTOFF", "WET", "", "", "", "", ""][control],
+            Self::BandMid => ["LOW CUT", "HIGH CUT", "WET", "", "", "", ""][control],
+            Self::LoFi => ["RATE", "BITS", "WET", "", "", "", ""][control],
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -172,6 +213,107 @@ pub fn lookback_beats(normalized: f64, cell_beats: f64) -> f64 {
         cell_beats
     } else {
         VALUES[index]
+    }
+}
+
+#[must_use]
+pub fn grid_label(normalized: f64) -> &'static str {
+    const LABELS: [&str; 9] = [
+        "1/64", "1/32", "1/16", "1/8", "1/4", "1/2", "1 BAR", "2 BAR", "4 BAR",
+    ];
+    LABELS[grid_index(normalized)]
+}
+
+#[must_use]
+pub fn lookback_label(normalized: f64) -> &'static str {
+    const LABELS: [&str; 10] = [
+        "CELL",
+        "1/16 BEAT",
+        "1/8 BEAT",
+        "1/4 BEAT",
+        "1/2 BEAT",
+        "1 BEAT",
+        "2 BEATS",
+        "4 BEATS",
+        "8 BEATS",
+        "16 BEATS",
+    ];
+    LABELS[lookback_index(normalized)]
+}
+
+/// Format one normalized macro value for a product UI.
+///
+/// This is deliberately separate from host parameter formatting: hosts keep
+/// seeing the stable normalized parameter, while editors may show its meaning
+/// in the context of the pad's current effect type.
+#[must_use]
+pub fn format_control_value(effect_type: EffectType, control: usize, normalized: f64) -> String {
+    if !effect_type.is_control_enabled(control) {
+        return String::new();
+    }
+    let normalized = clamp_macro(normalized);
+    let percent = |value: f64| format!("{:.0}%", value * 100.0);
+
+    match effect_type {
+        EffectType::Off => String::new(),
+        EffectType::BeatRepeat => match control {
+            0 => grid_label(normalized).to_owned(),
+            1 => lookback_label(normalized).to_owned(),
+            2 | 6 => percent(normalized),
+            3 => if normalized >= 0.5 { "INSERT" } else { "MIX" }.to_owned(),
+            4 => format!("{:+.0} st", denormalize_linear(normalized, -24.0, 24.0)),
+            _ => format!("{:.1} dB", denormalize_linear(normalized, 0.0, 12.0)),
+        },
+        EffectType::Reverse => match control {
+            0 => grid_label(normalized).to_owned(),
+            1 | 5 | 6 => percent(normalized),
+            2 => if normalized >= 0.5 { "INSERT" } else { "MIX" }.to_owned(),
+            3 => format!("{:+.0} st", denormalize_linear(normalized, -24.0, 24.0)),
+            _ => format!("{:.1} dB", denormalize_linear(normalized, 0.0, 12.0)),
+        },
+        EffectType::TapeStop => match control {
+            0 => grid_label(normalized).to_owned(),
+            1 => format!("{:.2}", denormalize_linear(normalized, 0.25, 4.0)),
+            2 => format!("{:.2}x", denormalize_linear(normalized, 0.5, 2.0)),
+            4 => if normalized >= 0.5 { "INSERT" } else { "MIX" }.to_owned(),
+            _ => percent(normalized),
+        },
+        EffectType::Gate => match control {
+            0 => grid_label(normalized).to_owned(),
+            1 => format!("{:.0}%", denormalize_linear(normalized, 5.0, 95.0)),
+            2 | 5 => percent(normalized),
+            3 => format!("{:.1} ms", denormalize_linear(normalized, 0.0, 20.0)),
+            _ => format!("{:.1} ms", denormalize_linear(normalized, 0.0, 100.0)),
+        },
+        EffectType::PitchDown | EffectType::PitchUp => format!(
+            "{:.0} st",
+            denormalize_linear(normalized, 1.0, 24.0).round()
+        ),
+        EffectType::PitchReset => format!(
+            "{:+.0} st",
+            denormalize_linear(normalized, -24.0, 24.0).round()
+        ),
+        EffectType::BandLow => match control {
+            0 => format!("{:.0} Hz", denormalize_linear(normalized, 80.0, 2000.0)),
+            _ => percent(normalized),
+        },
+        EffectType::BandMid => match control {
+            0 => format!("{:.0} Hz", denormalize_linear(normalized, 80.0, 4000.0)),
+            1 => format!("{:.0} Hz", denormalize_linear(normalized, 500.0, 16000.0)),
+            _ => percent(normalized),
+        },
+        EffectType::BandHigh => match control {
+            0 => format!("{:.0} Hz", denormalize_linear(normalized, 1000.0, 16000.0)),
+            _ => percent(normalized),
+        },
+        EffectType::LoFi => match control {
+            0 => format!("{:.0} Hz", denormalize_linear(normalized, 1000.0, 44100.0)),
+            1 => format!(
+                "{:.0} bit",
+                denormalize_linear(normalized, 2.0, 16.0).round()
+            ),
+            _ => percent(normalized),
+        },
     }
 }
 
@@ -959,6 +1101,131 @@ mod tests {
         assert_eq!(state.pads[0].effect_type, EffectType::BeatRepeat);
         assert_eq!(state.pads[15].effect_type, EffectType::LoFi);
         assert_eq!(state.pads[4].macros[1], lookback_normalized(6));
+    }
+
+    #[test]
+    fn effect_control_metadata_matches_the_cpp_contract() {
+        let expected = [
+            (EffectType::Off, 0, ["", "", "", "", "", "", ""]),
+            (
+                EffectType::BeatRepeat,
+                7,
+                [
+                    "CELL", "LOOKBACK", "WET", "MODE", "PITCH", "DECAY", "JITTER",
+                ],
+            ),
+            (
+                EffectType::Reverse,
+                7,
+                [
+                    "LENGTH", "WET", "MODE", "PITCH", "DECAY", "OFFSET", "JITTER",
+                ],
+            ),
+            (
+                EffectType::TapeStop,
+                7,
+                ["TIME", "CURVE", "START", "WET", "MODE", "OFFSET", "FADE"],
+            ),
+            (
+                EffectType::Gate,
+                6,
+                ["GRID", "DUTY", "DEPTH", "ATTACK", "RELEASE", "PHASE", ""],
+            ),
+            (EffectType::PitchDown, 1, ["STEP", "", "", "", "", "", ""]),
+            (
+                EffectType::PitchReset,
+                1,
+                ["TARGET", "", "", "", "", "", ""],
+            ),
+            (EffectType::PitchUp, 1, ["STEP", "", "", "", "", "", ""]),
+            (
+                EffectType::BandLow,
+                2,
+                ["CUTOFF", "WET", "", "", "", "", ""],
+            ),
+            (
+                EffectType::BandMid,
+                3,
+                ["LOW CUT", "HIGH CUT", "WET", "", "", "", ""],
+            ),
+            (
+                EffectType::BandHigh,
+                2,
+                ["CUTOFF", "WET", "", "", "", "", ""],
+            ),
+            (EffectType::LoFi, 3, ["RATE", "BITS", "WET", "", "", "", ""]),
+        ];
+
+        for (effect, active_count, names) in expected {
+            assert_eq!(effect.active_control_count(), active_count);
+            for (control, expected_name) in names.into_iter().enumerate() {
+                assert_eq!(effect.control_name(control), expected_name);
+                assert_eq!(effect.is_control_enabled(control), control < active_count);
+            }
+            assert_eq!(effect.control_name(NUM_MACROS), "");
+            assert!(!effect.is_control_enabled(NUM_MACROS));
+        }
+    }
+
+    #[test]
+    fn semantic_control_values_match_the_cpp_ui_contract() {
+        assert_eq!(
+            format_control_value(EffectType::BeatRepeat, 0, grid_normalized(2)),
+            "1/16"
+        );
+        assert_eq!(
+            format_control_value(EffectType::BeatRepeat, 1, lookback_normalized(0)),
+            "CELL"
+        );
+        assert_eq!(
+            format_control_value(EffectType::BeatRepeat, 2, 0.625),
+            "62%"
+        );
+        assert_eq!(format_control_value(EffectType::BeatRepeat, 3, 0.49), "MIX");
+        assert_eq!(
+            format_control_value(EffectType::BeatRepeat, 3, 0.5),
+            "INSERT"
+        );
+        assert_eq!(
+            format_control_value(EffectType::BeatRepeat, 4, 0.75),
+            "+12 st"
+        );
+        assert_eq!(format_control_value(EffectType::Reverse, 4, 0.5), "6.0 dB");
+        assert_eq!(format_control_value(EffectType::TapeStop, 1, 0.5), "2.12");
+        assert_eq!(format_control_value(EffectType::TapeStop, 2, 0.5), "1.25x");
+        assert_eq!(format_control_value(EffectType::Gate, 1, 0.5), "50%");
+        assert_eq!(format_control_value(EffectType::Gate, 3, 0.05), "1.0 ms");
+        assert_eq!(format_control_value(EffectType::PitchUp, 0, 0.0), "1 st");
+        assert_eq!(
+            format_control_value(EffectType::PitchReset, 0, 0.5),
+            "+0 st"
+        );
+        assert_eq!(
+            format_control_value(
+                EffectType::BandMid,
+                1,
+                normalize_linear(3600.0, 500.0, 16000.0),
+            ),
+            "3600 Hz"
+        );
+        assert_eq!(
+            format_control_value(
+                EffectType::LoFi,
+                0,
+                normalize_linear(11025.0, 1000.0, 44100.0),
+            ),
+            "11025 Hz"
+        );
+        assert_eq!(
+            format_control_value(EffectType::LoFi, 1, normalize_linear(8.0, 2.0, 16.0),),
+            "8 bit"
+        );
+        assert_eq!(format_control_value(EffectType::LoFi, 2, 1.0), "100%");
+        assert_eq!(format_control_value(EffectType::LoFi, 3, 1.0), "");
+        assert_eq!(
+            format_control_value(EffectType::BandLow, 0, f64::NAN),
+            "80 Hz"
+        );
     }
 
     #[test]

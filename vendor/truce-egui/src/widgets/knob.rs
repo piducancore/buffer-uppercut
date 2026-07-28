@@ -1,5 +1,7 @@
 //! Rotary knob control bound to a truce parameter.
 
+use std::borrow::Cow;
+
 use truce_core::editor::{PluginContext, PluginContextReadF32};
 use truce_params::Params;
 
@@ -29,7 +31,31 @@ pub fn param_knob<P: Params + ?Sized>(
     id: impl Into<u32>,
     label: &str,
 ) -> egui::Response {
-    let id = id.into();
+    param_knob_inner(ui, state, id.into(), label, None)
+}
+
+/// Show a parameter knob with editor-specific value text.
+///
+/// Parameter reads and automation gestures are identical to [`param_knob`].
+/// Only the painted value string is replaced, leaving host-facing parameter
+/// formatting and parsing untouched.
+pub fn param_knob_with_value_text<P: Params + ?Sized>(
+    ui: &mut egui::Ui,
+    state: &PluginContext<P>,
+    id: impl Into<u32>,
+    label: &str,
+    value_text: &str,
+) -> egui::Response {
+    param_knob_inner(ui, state, id.into(), label, Some(value_text))
+}
+
+fn param_knob_inner<P: Params + ?Sized>(
+    ui: &mut egui::Ui,
+    state: &PluginContext<P>,
+    id: u32,
+    label: &str,
+    value_text: Option<&str>,
+) -> egui::Response {
     let desired = egui::vec2(KNOB_SIZE, KNOB_TOTAL_H);
     let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::drag());
 
@@ -133,12 +159,13 @@ pub fn param_knob<P: Params + ?Sized>(
         );
 
         // Value text (below knob arc)
-        let value_text = state.format_param(id);
+        let value_text =
+            value_text.map_or_else(|| Cow::Owned(state.format_param(id)), Cow::Borrowed);
         let value_y = center.y + KNOB_RADIUS + 2.0;
         painter.text(
             egui::pos2(rect.center().x, value_y),
             egui::Align2::CENTER_TOP,
-            &value_text,
+            value_text.as_ref(),
             egui::FontId::proportional(10.0),
             text_color,
         );

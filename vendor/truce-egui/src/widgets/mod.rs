@@ -11,7 +11,7 @@ mod toggle;
 mod xy_pad;
 
 pub use dropdown::param_dropdown;
-pub use knob::param_knob;
+pub use knob::{param_knob, param_knob_with_value_text};
 pub use meter::level_meter;
 pub use slider::param_slider;
 pub use toggle::param_toggle;

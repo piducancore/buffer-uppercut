@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
+
 use truce::prelude::*;
 
 pub const NUM_PADS: usize = 16;
@@ -394,6 +396,10 @@ pub struct BufferUppercutParams {
     pad_15: Pad15Params,
     #[nested(base = 136)]
     pad_16: Pad16Params,
+    #[skip]
+    midi_held_pad_bits: AtomicU16,
+    #[skip]
+    midi_pad_press_event: AtomicU32,
 }
 
 #[must_use]
@@ -411,6 +417,32 @@ pub const fn pad_control_id(pad: usize, control: usize) -> u32 {
     pad_trigger_id(pad) + 2 + control as u32
 }
 
+impl BufferUppercutParams {
+    pub(crate) fn set_midi_held_pad_bits(&self, bits: u16) {
+        self.midi_held_pad_bits.store(bits, Ordering::Release);
+    }
+
+    pub(crate) fn midi_held_pad_bits(&self) -> u16 {
+        self.midi_held_pad_bits.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn record_midi_pad_press(&self, pad: usize) {
+        debug_assert!(pad < NUM_PADS);
+        let previous = self.midi_pad_press_event.load(Ordering::Relaxed);
+        let sequence = ((previous >> 8).wrapping_add(1)) & 0x00ff_ffff;
+        let encoded_pad = pad as u32 + 1;
+        self.midi_pad_press_event
+            .store((sequence << 8) | encoded_pad, Ordering::Release);
+    }
+
+    pub(crate) fn midi_pad_press_event(&self) -> (u32, Option<usize>) {
+        let event = self.midi_pad_press_event.load(Ordering::Acquire);
+        let encoded_pad = event & 0xff;
+        let pad = (encoded_pad != 0).then(|| encoded_pad as usize - 1);
+        (event >> 8, pad)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,6 +457,19 @@ mod tests {
         assert_eq!(infos[1].name, "Pad 1 Trigger");
         assert_eq!(infos[144].id, 144);
         assert_eq!(infos[144].name, "Pad 16 Control 7");
+    }
+
+    #[test]
+    fn midi_ui_state_is_ephemeral_and_not_a_parameter() {
+        let params = BufferUppercutParams::default();
+        params.set_midi_held_pad_bits((1 << 0) | (1 << 15));
+        assert_eq!(params.midi_held_pad_bits(), (1 << 0) | (1 << 15));
+        assert_eq!(params.midi_pad_press_event(), (0, None));
+        params.record_midi_pad_press(5);
+        assert_eq!(params.midi_pad_press_event(), (1, Some(5)));
+        params.record_midi_pad_press(15);
+        assert_eq!(params.midi_pad_press_event(), (2, Some(15)));
+        assert_eq!(params.count(), 145);
     }
 
     #[test]

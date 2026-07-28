@@ -1,10 +1,13 @@
 use std::sync::Arc;
+use std::time::Duration;
 
+use buffer_uppercut_dsp::{EffectType, format_control_value};
 use egui::{Color32, CornerRadius, Frame, Margin, RichText, Stroke};
-use truce::prelude::{Editor, PluginContext};
+use truce::core::editor::PluginContextReadF32;
+use truce::prelude::{Editor, Params, PluginContext};
 use truce_egui::{
     EguiEditor,
-    widgets::{param_dropdown, param_knob, param_toggle},
+    widgets::{param_dropdown, param_knob, param_knob_with_value_text, param_toggle},
 };
 
 use crate::params::{
@@ -18,7 +21,17 @@ const PANEL: Color32 = Color32::from_rgb(40, 44, 51);
 
 pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
     let mut selected_pad = 0_usize;
+    let (mut last_midi_press_sequence, _) = params.midi_pad_press_event();
+    let mut auto_select_midi = true;
     let editor = EguiEditor::new(params, (920, 520), move |ui, state| {
+        ui.ctx().request_repaint_after(Duration::from_millis(30));
+        let (midi_press_sequence, pressed_pad) = state.params().midi_pad_press_event();
+        if midi_press_sequence != last_midi_press_sequence {
+            last_midi_press_sequence = midi_press_sequence;
+            if let (true, Some(pad)) = (auto_select_midi, pressed_pad) {
+                selected_pad = pad;
+            }
+        }
         ui.style_mut().spacing.item_spacing = egui::vec2(8.0, 8.0);
         Frame::NONE
             .fill(SURFACE)
@@ -32,7 +45,13 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                         .corner_radius(CornerRadius::same(10))
                         .inner_margin(Margin::same(14))
                         .show(&mut columns[0], |ui| {
-                            ui.label(RichText::new("PERFORMANCE PADS").strong());
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("PERFORMANCE PADS").strong());
+                                ui.checkbox(&mut auto_select_midi, "Auto-select MIDI")
+                                    .on_hover_text(
+                                        "Select a pad when its MIDI note is pressed",
+                                    );
+                            });
                             ui.add_space(8.0);
                             pads(ui, state, &mut selected_pad);
                         });
@@ -101,13 +120,21 @@ fn pads(ui: &mut egui::Ui, state: &PluginContext<BufferUppercutParams>, selected
         .show(ui, |ui| {
             for pad in 0..NUM_PADS {
                 let selected = *selected_pad == pad;
+                let trigger_held = state.get_param(pad_trigger_id(pad)) >= 0.5;
+                let midi_held = state.params().midi_held_pad_bits() & (1 << pad) != 0;
+                let held = trigger_held || midi_held;
                 Frame::NONE
-                    .fill(if selected {
+                    .fill(if held {
+                        ACCENT
+                    } else if selected {
                         Color32::from_rgb(63, 48, 44)
                     } else {
                         Color32::from_rgb(48, 52, 60)
                     })
-                    .stroke(Stroke::new(1.0_f32, if selected { ACCENT } else { PANEL }))
+                    .stroke(Stroke::new(
+                        1.0_f32,
+                        if selected || held { ACCENT } else { PANEL },
+                    ))
                     .corner_radius(CornerRadius::same(7))
                     .inner_margin(Margin::symmetric(7, 6))
                     .show(ui, |ui| {
@@ -145,17 +172,29 @@ fn selected_pad_controls(
     ui.separator();
     ui.label(RichText::new("MACROS").strong());
     ui.add_space(4.0);
+    let effect_index = state
+        .params()
+        .get_plain(pad_type_id(selected_pad))
+        .unwrap_or_default()
+        .round() as i32;
+    let effect_type = EffectType::from_index(effect_index);
     egui::Grid::new("selected-pad-macros")
         .num_columns(4)
         .spacing([8.0, 6.0])
         .show(ui, |ui| {
             for control in 0..NUM_MACROS {
-                param_knob(
-                    ui,
-                    state,
-                    pad_control_id(selected_pad, control),
-                    &format!("{}", control + 1),
-                );
+                let id = pad_control_id(selected_pad, control);
+                let normalized = state.params().get_plain(id).unwrap_or_default();
+                let value_text = format_control_value(effect_type, control, normalized);
+                ui.add_enabled_ui(effect_type.is_control_enabled(control), |ui| {
+                    param_knob_with_value_text(
+                        ui,
+                        state,
+                        id,
+                        effect_type.control_name(control),
+                        &value_text,
+                    );
+                });
                 if control % 4 == 3 {
                     ui.end_row();
                 }
