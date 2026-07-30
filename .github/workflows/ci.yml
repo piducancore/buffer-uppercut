@@ -45,7 +45,15 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev
+          sudo apt-get install -y \
+            libasound2-dev \
+            libfontconfig-dev \
+            libgl1-mesa-dev \
+            libudev-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev
 
       - name: Install TRUCE build tool
         run: cargo install cargo-truce --version 6.3.0 --locked
