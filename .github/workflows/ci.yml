@@ -70,7 +70,7 @@ jobs:
       - name: Build CLAP, VST3, and standalone artifacts
         run: |
           cargo truce build --clap --vst3
-          cargo build --locked --release --bin buffer-uppercut-truce-standalone
+          cargo build --locked --release --bin buffer-uppercut-standalone
 
       - name: Install clap-validator
         run: cargo install --git https://github.com/free-audio/clap-validator --locked
@@ -100,7 +100,7 @@ jobs:
             # current clap-validator builds on Windows. Run each validator
             # explicitly until the build tool is updated.
             cargo truce validate --pluginval --skip-gui-tests
-            clap-validator validate "target/bundles/Buffer Uppercut TRUCE Preview.clap"
+            clap-validator validate "target/bundles/Buffer Uppercut.clap"
           else
             cargo truce validate --clap --pluginval --skip-gui-tests
           fi

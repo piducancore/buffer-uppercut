@@ -1,10 +1,10 @@
 [package]
-name = "buffer-uppercut-truce"
+name = "buffer-uppercut"
 version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [".", "dsp", "vendor/truce-egui"]
+members = [".", "dsp", "kit", "vendor/truce-slint"]
 exclude = ["vendor/truce-clap"]
 resolver = "3"
 
@@ -12,7 +12,7 @@ resolver = "3"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [[bin]]
-name = "buffer-uppercut-truce-standalone"
+name = "buffer-uppercut-standalone"
 path = "src/main.rs"
 required-features = ["standalone"]
 
@@ -35,25 +35,30 @@ rt-paranoid = ["truce/rt-paranoid"]
 
 [dependencies]
 buffer-uppercut-dsp = { path = "dsp" }
+buffer-uppercut-kit = { path = "kit" }
 truce = { version = "6.3" }
-truce-egui = { version = "6.3" }
-egui = "0.34"
+truce-slint = { version = "6.3" }
+slint = { version = "=1.15.1", default-features = false, features = ["compat-1-2", "renderer-software", "std"] }
+rfd = "0.15"
 truce-clap = { version = "6.3", optional = true }
 truce-vst3 = { version = "6.3", optional = true }
 truce-standalone = { version = "6.3", features = ["gui"], optional = true }
 clap-sys = { version = "0.5", optional = true }
 
+[build-dependencies]
+truce-slint-build = { version = "6.3" }
+
 # Narrow exact-version wrapper backports. Remove each override after the
 # corresponding behavior ships upstream; see the PATCH.md in each directory.
 [patch.crates-io]
 truce-clap = { path = "vendor/truce-clap" }
-truce-egui = { path = "vendor/truce-egui" }
+truce-slint = { path = "vendor/truce-slint" }
 
 # Custom profile for `cargo truce install --shell`. The shell-mode
 # build (`cargo build --profile shell --features ...,shell`) lands the
 # shell binary at `target/shell/lib<crate>.dylib`, independent of
 # `target/release/` (where regular `cargo build --release` writes) and
 # `target/debug/` (where `cargo build` writes). Inherits release for
-# DSP perf parity.
+# DSP performance.
 [profile.shell]
 inherits = "release"

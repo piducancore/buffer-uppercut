@@ -1,4 +1,4 @@
-# Pinned contract snapshot
+# Seed corpus provenance
 
 - Contract: `dsp-contract-v1`
 - Reference C++ commit: `bc17659aa517b9910761c1861cadd873402b75de`
@@ -12,6 +12,7 @@ Verify the vendored snapshot from the repository root:
 cargo test -p buffer-uppercut-dsp --test contract
 ```
 
-The manifest contains the SHA-256 of each fixture. Sync the complete directory
-from the canonical C++ repository as one unit; never update individual expected
-samples in this repository.
+The manifest contains the SHA-256 of each fixture. These files are now owned as
+regression evidence by the canonical Rust repository. Do not resync them from
+an archived implementation. Intentional sound changes create a new versioned
+corpus; never update individual expected samples silently.

@@ -1,110 +1,84 @@
-# Buffer Uppercut — TRUCE + native GUI comparison
+# Buffer Uppercut
 
-This repository is the TRUCE 6.3 + egui comparison build of Buffer Uppercut.
-It exists beside the WRAC/WebView preview so the two framework paths can be
-evaluated at the same milestone.
+Buffer Uppercut is a real-time buffer performance audio effect built in Rust
+with TRUCE 6.3 and a native Slint interface. This repository is the canonical
+product implementation.
 
-## Current milestone
+It provides:
 
-- 145 automatable parameters with the same IDs, names, ranges, and classic
-  defaults as the WRAC preview
-- MIDI notes 60–75 mapped to the 16 performance pads
-- octave aliases for pitch notes 69–71
-- MIDI pad illumination and optional pad auto-selection
-- effect-aware macro labels and semantic values, with unused controls disabled
-- host tempo/transport access
-- native egui editor
-- host-managed parameter state
-- CLAP, VST3, and standalone targets
-- independent, framework-free `f64` DSP core
-- beat repeat, reverse, tape stop, gate, pitch actions, three bands, and LoFi
-- pinned C++ behavior fixtures with `1e-7` absolute/relative tolerance
-- allocation-free processing after activation/reset
+- 16 momentary performance pads driven by the UI, automation, or MIDI notes
+  60–75;
+- beat repeat, reverse, tape stop, gate, pitch actions, low/mid/high bands,
+  and LoFi effects;
+- seven effect-aware macros per pad with semantic labels and values;
+- a stereo history/captured-slice waveform;
+- four factory kits and native `.bupreset` import/export;
+- host tempo, automation, state recall, MIDI illumination, and MIDI
+  auto-selection;
+- CLAP, VST3, and standalone targets;
+- a framework-neutral planar `f64` DSP core with allocation-free processing
+  after activation.
 
-The plugin has unique preview metadata, so it can be installed beside the
-WRAC preview without replacing it.
+Earlier C++ and WRAC implementations were experiments. They are not supported
+state, preset, product-ID, or source-compatibility targets.
 
-## Prerequisites
+## Quick start
+
+Prerequisites:
 
 - Rust 1.92 or newer
 - `cargo-truce` 6.3
+- platform audio/window development libraries
 - Xcode command-line tools on macOS
 
 ```sh
 rustup update stable
 cargo install cargo-truce --version 6.3.0 --locked
 cargo truce doctor
-```
-
-## Run the native app
-
-```sh
 cargo truce run
 ```
 
-The standalone app is the quickest way to inspect and develop the native GUI.
-Use its audio and MIDI menus to select devices.
-
-## Build plugin bundles
+Build and install the plugin formats:
 
 ```sh
 cargo truce build --clap --vst3
-```
-
-Artifacts are written below `target/bundles/`.
-
-## Install for a DAW
-
-```sh
 cargo truce install --clap --vst3
 ```
 
-On macOS the user install locations are:
+Artifacts are written to `target/bundles/`. On macOS the installed bundles are:
 
-- `~/Library/Audio/Plug-Ins/CLAP`
-- `~/Library/Audio/Plug-Ins/VST3`
+- `~/Library/Audio/Plug-Ins/CLAP/Buffer Uppercut.clap`
+- `~/Library/Audio/Plug-Ins/VST3/Buffer Uppercut.vst3`
 
-Quit and reopen the DAW after installing. Hosts commonly retain loaded plugin
-binaries for their whole process lifetime. Look for
-**Buffer Uppercut TRUCE Preview**.
+Quit and reopen the DAW after installing because hosts commonly retain loaded
+plugin binaries for the process lifetime.
 
-## Develop
+## Verify
 
 ```sh
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-cargo test --features rt-paranoid
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace
+cargo test --locked --workspace --features rt-paranoid
 cargo truce build --clap --vst3
 ```
 
-Use `cargo truce run` for normal editor iteration. The optional TRUCE shell
-workflow can shorten plugin reload cycles:
+Render or check the Slint editor:
 
 ```sh
-cargo truce install --shell --vst3 --debug
+cargo truce screenshot --out /tmp/buffer-uppercut.png --debug --scale 1
+cargo truce screenshot --out screenshots/slint-default.png --check --debug --scale 1
+BUFFER_UPPERCUT_EDITOR_SIZE=920x620 cargo truce screenshot --out screenshots/slint-minimum.png --check --debug --scale 1
+BUFFER_UPPERCUT_EDITOR_SIZE=1440x760 cargo truce screenshot --out screenshots/slint-wide.png --check --debug --scale 1
 ```
 
-Re-run that command after code changes to replace the shell-loaded logic
-library while keeping the stable wrapper installed.
+## Documentation
 
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the code map, state and
-real-time rules, validation flow, and how to add another export format.
-See [docs/COMPARISON.md](docs/COMPARISON.md) for the controlled WRAC/TRUCE
-comparison.
+- [Architecture](docs/ARCHITECTURE.md): system boundaries and runtime flows
+- [Contracts](docs/CONTRACTS.md): parameters, MIDI, realtime, kits, and state
+- [Development](docs/DEVELOPMENT.md): common implementation workflows
+- [Testing](docs/TESTING.md): automated and DAW acceptance procedures
+- [Roadmap](docs/ROADMAP.md): current status, next work, and deferred scope
+- [Decision records](docs/adr/README.md): architectural rationale
 
-## DSP contract
-
-The local `buffer-uppercut-dsp` crate is an independent Rust port. Its
-integration tests consume the vendored `contract/` snapshot from C++ commit
-`bc17659aa517b9910761c1861cadd873402b75de`. Verify the snapshot and render
-fixtures with:
-
-```sh
-(cd contract && shasum -a 256 -c SHA256SUMS)
-cargo test -p buffer-uppercut-dsp --test contract
-```
-
-See [contract/PINNED.md](contract/PINNED.md) before updating fixtures.
-Parameter-state data remains native to each framework; cross-framework preset
-migration and kit import/export are not part of this milestone.
+New agents must begin with [AGENTS.md](AGENTS.md).

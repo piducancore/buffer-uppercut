@@ -12,7 +12,7 @@
 [package]
 edition = "2024"
 rust-version = "1.92"
-name = "truce-egui"
+name = "truce-slint"
 version = "6.3.0"
 build = false
 autolib = false
@@ -20,36 +20,46 @@ autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "egui-based GUI backend for truce audio plugins"
+description = "Slint-based GUI backend for truce audio plugins"
 homepage = "https://github.com/truce-audio/truce"
 readme = "README.md"
-license = "LicenseRef-TruceLicense-1.0"
+license = "Apache-2.0 OR MIT"
 repository = "https://github.com/truce-audio/truce"
 
 [lib]
-name = "truce_egui"
+name = "truce_slint"
 path = "src/lib.rs"
 
-[dependencies.egui]
-version = "0.34"
+[[test]]
+name = "hidpi_scale_reconcile"
+path = "tests/hidpi_scale_reconcile.rs"
 
-[dependencies.egui-wgpu]
-version = "0.34"
-default-features = false
-
-[dependencies.keyboard-types]
-version = "0.7"
+[dependencies.bytemuck]
+version = "1"
+features = ["derive"]
 
 [dependencies.log]
 version = "0.4"
 
-[dependencies.pollster]
-version = "0.4"
+[dependencies.paste]
+version = "1"
 
 [dependencies.raw-window-handle]
 version = "0.5"
 
+[dependencies.slint]
+version = "=1.15.1"
+features = [
+    "compat-1-2",
+    "renderer-software",
+    "std",
+]
+default-features = false
+
 [dependencies.truce-core]
+version = "6.3.0"
+
+[dependencies.truce-gpu]
 version = "6.3.0"
 
 [dependencies.truce-gui]
@@ -59,14 +69,20 @@ default-features = false
 [dependencies.truce-params]
 version = "6.3.0"
 
-[dependencies.wgpu]
-version = "29"
-features = ["wgsl"]
-default-features = false
-
 [target.'cfg(not(target_os = "ios"))'.dependencies.baseview]
 version = "0.1.1-truce.13"
 package = "baseview-truce"
+
+[target.'cfg(not(target_os = "ios"))'.dependencies.keyboard-types]
+version = "0.7"
+
+[target.'cfg(not(target_os = "ios"))'.dependencies.pollster]
+version = "0.4"
+
+[target.'cfg(not(target_os = "ios"))'.dependencies.wgpu]
+version = "29"
+features = ["wgsl"]
+default-features = false
 
 [target.'cfg(target_os = "ios")'.dependencies.objc2]
 version = "0.6"
@@ -78,24 +94,8 @@ features = [
     "NSGeometry",
 ]
 
-[target.'cfg(target_os = "ios")'.dependencies.wgpu]
-version = "29"
-features = [
-    "wgsl",
-    "metal",
-]
-default-features = false
-
 [target.'cfg(target_os = "macos")'.dependencies.objc]
 version = "0.2"
-
-[target.'cfg(target_os = "macos")'.dependencies.wgpu]
-version = "29"
-features = [
-    "wgsl",
-    "metal",
-]
-default-features = false
 
 [lints.clippy.pedantic]
 level = "warn"
@@ -105,3 +105,6 @@ priority = -1
 level = "warn"
 priority = 0
 check-cfg = ['cfg(feature, values("cargo-clippy"))']
+
+[profile.shell]
+inherits = "release"

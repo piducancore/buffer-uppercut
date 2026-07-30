@@ -5,9 +5,9 @@ url = "https://github.com/piducancore/buffer-uppercut-truce"
 au_manufacturer = "Pidu"
 
 [[plugin]]
-name = "Buffer Uppercut TRUCE Preview"
-bundle_id = "buffer-uppercut-truce-preview"
-crate = "buffer-uppercut-truce"
+name = "Buffer Uppercut"
+bundle_id = "buffer-uppercut"
+crate = "buffer-uppercut"
 category = "effect"
 fourcc = "BUTr"
 au_tag = "Effects"

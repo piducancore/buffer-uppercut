@@ -1,9 +1,10 @@
-# Buffer Uppercut DSP Contract v1
+# Buffer Uppercut DSP regression corpus v1
 
-This directory is the frozen, framework-neutral behavior contract for the C++
-engine at commit `bc17659aa517b9910761c1861cadd873402b75de`. WRAC and TRUCE
-may consume these files, but neither Rust implementation is an oracle for the
-other.
+This directory is a frozen, framework-neutral regression corpus seeded from
+the experimental C++ engine at commit
+`bc17659aa517b9910761c1861cadd873402b75de`. The provenance establishes how the
+expected samples were produced; it does not make the archived implementation a
+compatibility target or perpetual oracle.
 
 Each `.budsp` file is UTF-8, tab-separated text. A processing fixture contains:
 
@@ -25,6 +26,6 @@ abs(actual - expected) <= 1e-7 + 1e-7 * abs(expected)
 pitch-reset, and pitch-up operations.
 
 Fixture checksums live in `manifest.json`. See
-[`../../DEVELOPMENT.md`](../../DEVELOPMENT.md) for regeneration and verification
-commands. Changes to expected behavior require a new contract version and an
-entry in `DEVIATIONS.md`.
+[`../docs/TESTING.md`](../docs/TESTING.md) for verification commands. An
+intentional sound change requires a new corpus version and an entry in
+`DEVIATIONS.md`.

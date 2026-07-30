@@ -1,213 +1,576 @@
+use std::cell::{Cell, RefCell};
+use std::fmt::Write as _;
+use std::fs;
+use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
 
-use buffer_uppercut_dsp::{EffectType, format_control_value};
-use egui::{Color32, CornerRadius, Frame, Margin, RichText, Stroke};
+use buffer_uppercut_dsp::{
+    EffectType, NUM_MACROS as DSP_NUM_MACROS, NUM_PADS as DSP_NUM_PADS, PadConfig,
+    PerformanceState, VisualizationBin, VisualizationMode, format_control_value,
+};
+use buffer_uppercut_kit::{
+    FACTORY_KIT_COUNT, KIT_EXTENSION, Kit, MAX_KIT_FILE_BYTES, decode, encode, factory_kit,
+};
 use truce::core::editor::PluginContextReadF32;
 use truce::prelude::{Editor, Params, PluginContext};
-use truce_egui::{
-    EguiEditor,
-    widgets::{param_dropdown, param_knob, param_knob_with_value_text, param_toggle},
-};
+use truce_slint::SlintEditor;
+use truce_slint::slint::{Model, ModelRc, SharedString, VecModel, include_modules};
 
 use crate::params::{
-    BufferUppercutParams, NUM_MACROS, NUM_PADS, PARAM_PERFORMANCE_PITCH_ID, pad_control_id,
-    pad_trigger_id, pad_type_id,
+    BufferUppercutParams, NUM_MACROS, NUM_PADS, PARAM_PERFORMANCE_PITCH_ID, WaveformSnapshot,
+    pad_control_id, pad_trigger_id, pad_type_id,
 };
 
-const ACCENT: Color32 = Color32::from_rgb(244, 104, 58);
-const SURFACE: Color32 = Color32::from_rgb(30, 33, 38);
-const PANEL: Color32 = Color32::from_rgb(40, 44, 51);
+include_modules!();
+
+const EFFECT_COUNT: usize = 12;
+const DEFAULT_EDITOR_SIZE: (u32, u32) = (1120, 700);
+const WAVEFORM_VIEWBOX_WIDTH: f32 = 1000.0;
+const WAVEFORM_VIEWBOX_HEIGHT: f32 = 100.0;
+const WAVEFORM_AMPLITUDE: f32 = 44.0;
 
 pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
-    let mut selected_pad = 0_usize;
-    let (mut last_midi_press_sequence, _) = params.midi_pad_press_event();
-    let mut auto_select_midi = true;
-    let editor = EguiEditor::new(params, (920, 520), move |ui, state| {
-        ui.ctx().request_repaint_after(Duration::from_millis(30));
-        let (midi_press_sequence, pressed_pad) = state.params().midi_pad_press_event();
-        if midi_press_sequence != last_midi_press_sequence {
-            last_midi_press_sequence = midi_press_sequence;
-            if let (true, Some(pad)) = (auto_select_midi, pressed_pad) {
-                selected_pad = pad;
-            }
-        }
-        ui.style_mut().spacing.item_spacing = egui::vec2(8.0, 8.0);
-        Frame::NONE
-            .fill(SURFACE)
-            .inner_margin(Margin::same(20))
-            .show(ui, |ui| {
-                header(ui, state);
-                ui.add_space(10.0);
-                ui.columns(2, |columns| {
-                    Frame::NONE
-                        .fill(PANEL)
-                        .corner_radius(CornerRadius::same(10))
-                        .inner_margin(Margin::same(14))
-                        .show(&mut columns[0], |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new("PERFORMANCE PADS").strong());
-                                ui.checkbox(&mut auto_select_midi, "Auto-select MIDI")
-                                    .on_hover_text(
-                                        "Select a pad when its MIDI note is pressed",
-                                    );
-                            });
-                            ui.add_space(8.0);
-                            pads(ui, state, &mut selected_pad);
-                        });
+    let editor = SlintEditor::new(params, configured_editor_size(), move |state| {
+        let ui = BufferUppercutUi::new().expect("create Buffer Uppercut Slint editor");
+        let selected_pad = Rc::new(Cell::new(0_usize));
+        let auto_select_midi = Rc::new(Cell::new(true));
+        let factory_kit_index = Rc::new(Cell::new(Some(0_usize)));
+        let kit_status = Rc::new(RefCell::new(String::new()));
+        let last_midi_press_sequence = Rc::new(Cell::new(state.params().midi_pad_press_event().0));
+        let active_macro_gestures: Rc<[Cell<Option<u32>>; NUM_MACROS]> =
+            Rc::new(std::array::from_fn(|_| Cell::new(None)));
 
-                    Frame::NONE
-                        .fill(PANEL)
-                        .corner_radius(CornerRadius::same(10))
-                        .inner_margin(Margin::same(14))
-                        .show(&mut columns[1], |ui| {
-                            selected_pad_controls(ui, state, selected_pad);
-                        });
-                });
-                ui.add_space(10.0);
-                ui.label(
-                    RichText::new(
-                        "Independent f64 DSP port · parameters, MIDI, state and host transport are live",
-                    )
-                    .small()
-                    .color(Color32::from_gray(150)),
-                );
+        let pads = Rc::new(VecModel::from(
+            (0..NUM_PADS).map(empty_pad_view).collect::<Vec<_>>(),
+        ));
+        let macros = Rc::new(VecModel::from(
+            (0..NUM_MACROS).map(empty_macro_view).collect::<Vec<_>>(),
+        ));
+        let effect_options = Rc::new(VecModel::from(
+            (0..EFFECT_COUNT)
+                .map(|index| SharedString::from(effect_name(EffectType::from_index(index as i32))))
+                .collect::<Vec<_>>(),
+        ));
+
+        ui.set_pads(ModelRc::from(pads.clone()));
+        ui.set_macros(ModelRc::from(macros.clone()));
+        ui.set_effect_options(ModelRc::from(effect_options));
+
+        {
+            let state = state.clone();
+            ui.on_pitch_edit_began(move || state.begin_edit(PARAM_PERFORMANCE_PITCH_ID));
+        }
+        {
+            let state = state.clone();
+            ui.on_pitch_value_changed(move |value| {
+                state.set_param(PARAM_PERFORMANCE_PITCH_ID, f64::from(value));
             });
+        }
+        {
+            let state = state.clone();
+            ui.on_pitch_edit_ended(move || state.end_edit(PARAM_PERFORMANCE_PITCH_ID));
+        }
+        {
+            let auto_select_midi = auto_select_midi.clone();
+            ui.on_auto_select_toggled(move |enabled| auto_select_midi.set(enabled));
+        }
+        {
+            let state = state.clone();
+            let selected_pad = selected_pad.clone();
+            let factory_kit_index = factory_kit_index.clone();
+            let kit_status = kit_status.clone();
+            ui.on_previous_kit(move || {
+                let index = factory_kit_index
+                    .get()
+                    .unwrap_or(0)
+                    .wrapping_add(FACTORY_KIT_COUNT - 1)
+                    % FACTORY_KIT_COUNT;
+                apply_kit(&state, &factory_kit(index), &selected_pad);
+                factory_kit_index.set(Some(index));
+                kit_status.borrow_mut().clear();
+            });
+        }
+        {
+            let state = state.clone();
+            let selected_pad = selected_pad.clone();
+            let factory_kit_index = factory_kit_index.clone();
+            let kit_status = kit_status.clone();
+            ui.on_next_kit(move || {
+                let index = (factory_kit_index.get().unwrap_or(0) + 1) % FACTORY_KIT_COUNT;
+                apply_kit(&state, &factory_kit(index), &selected_pad);
+                factory_kit_index.set(Some(index));
+                kit_status.borrow_mut().clear();
+            });
+        }
+        {
+            let state = state.clone();
+            let selected_pad = selected_pad.clone();
+            let factory_kit_index = factory_kit_index.clone();
+            let kit_status = kit_status.clone();
+            ui.on_load_kit(move || {
+                let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Buffer Uppercut preset", &[KIT_EXTENSION])
+                    .pick_file()
+                else {
+                    return;
+                };
+                match read_kit(&path) {
+                    Ok(mut kit) => {
+                        // Portable kit files intentionally do not change the
+                        // performance pitch; it is performance state rather
+                        // than part of a reusable kit.
+                        kit.state.performance_pitch = 0.0;
+                        apply_kit(&state, &kit, &selected_pad);
+                        factory_kit_index.set(None);
+                        kit_status.borrow_mut().clear();
+                    }
+                    Err(error) => {
+                        *kit_status.borrow_mut() = format!("LOAD ERROR / {error}");
+                    }
+                }
+            });
+        }
+        {
+            let state = state.clone();
+            let kit_status = kit_status.clone();
+            ui.on_save_kit(move || {
+                let current_name = state.params().kit_name();
+                let suggested_name = format!("{current_name}.{KIT_EXTENSION}");
+                let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Buffer Uppercut preset", &[KIT_EXTENSION])
+                    .set_file_name(&suggested_name)
+                    .save_file()
+                else {
+                    return;
+                };
+                let name = kit_name_from_path(&path);
+                let kit = capture_kit(state.params(), name.clone());
+                match fs::write(&path, encode(&kit)) {
+                    Ok(()) => {
+                        state.params().set_kit_name(&name);
+                        kit_status.borrow_mut().clear();
+                    }
+                    Err(error) => {
+                        *kit_status.borrow_mut() = format!("SAVE ERROR / {error}");
+                    }
+                }
+            });
+        }
+        {
+            let state = state.clone();
+            let selected_pad = selected_pad.clone();
+            ui.on_pad_pressed(move |pad| {
+                let pad = valid_pad_index(pad);
+                selected_pad.set(pad);
+                let id = pad_trigger_id(pad);
+                state.begin_edit(id);
+                state.set_param(id, 1.0);
+            });
+        }
+        {
+            let state = state.clone();
+            ui.on_pad_released(move |pad| {
+                let id = pad_trigger_id(valid_pad_index(pad));
+                state.set_param(id, 0.0);
+                state.end_edit(id);
+            });
+        }
+        {
+            let state = state.clone();
+            let selected_pad = selected_pad.clone();
+            ui.on_effect_changed(move |index| {
+                let effect = index.clamp(0, EFFECT_COUNT as i32 - 1) as usize;
+                let normalized = truce::core::cast::discrete_norm(effect, EFFECT_COUNT);
+                state.automate(pad_type_id(selected_pad.get()), normalized);
+            });
+        }
+        {
+            let state = state.clone();
+            let selected_pad = selected_pad.clone();
+            let active_macro_gestures = active_macro_gestures.clone();
+            ui.on_macro_edit_began(move |control| {
+                let Some(control) = valid_macro_index(control) else {
+                    return;
+                };
+                let id = pad_control_id(selected_pad.get(), control);
+                active_macro_gestures[control].set(Some(id));
+                state.begin_edit(id);
+            });
+        }
+        {
+            let state = state.clone();
+            let active_macro_gestures = active_macro_gestures.clone();
+            ui.on_macro_value_changed(move |control, value| {
+                let Some(control) = valid_macro_index(control) else {
+                    return;
+                };
+                if let Some(id) = active_macro_gestures[control].get() {
+                    state.set_param(id, f64::from(value));
+                }
+            });
+        }
+        {
+            let state = state.clone();
+            let active_macro_gestures = active_macro_gestures.clone();
+            ui.on_macro_edit_ended(move |control| {
+                let Some(control) = valid_macro_index(control) else {
+                    return;
+                };
+                if let Some(id) = active_macro_gestures[control].take() {
+                    state.end_edit(id);
+                }
+            });
+        }
+
+        let waveform = Rc::new(RefCell::new(WaveformSnapshot::default()));
+        Box::new(move |state: &PluginContext<BufferUppercutParams>| {
+            let (midi_press_sequence, pressed_pad) = state.params().midi_pad_press_event();
+            if midi_press_sequence != last_midi_press_sequence.get() {
+                last_midi_press_sequence.set(midi_press_sequence);
+                if auto_select_midi.get()
+                    && let Some(pad) = pressed_pad
+                {
+                    selected_pad.set(pad);
+                }
+            }
+
+            let selected = selected_pad.get().min(NUM_PADS - 1);
+            ui.set_selected_pad(selected as i32);
+            ui.set_auto_select(auto_select_midi.get());
+            let status = kit_status.borrow();
+            ui.set_kit_display(SharedString::from(if status.is_empty() {
+                state.params().kit_name()
+            } else {
+                status.clone()
+            }));
+
+            let transport = state.transport();
+            let tempo = transport.map_or_else(
+                || SharedString::from("--.-"),
+                |transport| SharedString::from(format!("{:.1}", transport.tempo)),
+            );
+            ui.set_tempo_text(tempo);
+
+            let pitch = state.get_param(PARAM_PERFORMANCE_PITCH_ID);
+            ui.set_pitch_value(pitch);
+            ui.set_pitch_text(SharedString::from(
+                state.format_param(PARAM_PERFORMANCE_PITCH_ID),
+            ));
+
+            let midi_held_bits = state.params().midi_held_pad_bits();
+            for pad in 0..NUM_PADS {
+                let effect = selected_effect(state, pad);
+                let trigger_held = state.get_param(pad_trigger_id(pad)) >= 0.5;
+                pads.set_row_data(
+                    pad,
+                    PadView {
+                        number: SharedString::from(format!("{:02}", pad + 1)),
+                        note: SharedString::from(format!("{}", pad + 60)),
+                        effect: SharedString::from(effect_abbreviation(effect)),
+                        held: trigger_held || midi_held_bits & (1_u16 << pad) != 0,
+                        selected: pad == selected,
+                    },
+                );
+            }
+
+            let effect = selected_effect(state, selected);
+            ui.set_effect_index(effect as i32);
+            ui.set_effect_name(SharedString::from(effect_name(effect)));
+            ui.set_selected_pad_note(SharedString::from(format!("MIDI {}", selected + 60)));
+            for control in 0..NUM_MACROS {
+                let id = pad_control_id(selected, control);
+                let value = state.get_param(id);
+                macros.set_row_data(
+                    control,
+                    MacroView {
+                        label: SharedString::from(effect.control_name(control)),
+                        value,
+                        value_text: SharedString::from(format_control_value(
+                            effect,
+                            control,
+                            f64::from(value),
+                        )),
+                        enabled: effect.is_control_enabled(control),
+                    },
+                );
+            }
+
+            let mut waveform = waveform.borrow_mut();
+            if state.params().waveform_snapshot(&mut waveform) {
+                let (left, right) = waveform_paths(&waveform.bins);
+                ui.set_waveform_left(SharedString::from(left));
+                ui.set_waveform_right(SharedString::from(right));
+                ui.set_waveform_playhead(waveform.meta.normalized_playhead.clamp(0.0, 1.0));
+                ui.set_waveform_mode(SharedString::from(match waveform.meta.mode {
+                    VisualizationMode::Rolling => "ROLLING / 4 BEATS",
+                    VisualizationMode::Capture => "CAPTURED CELL",
+                }));
+                ui.set_waveform_status(SharedString::from(waveform_status(&waveform)));
+            }
+        })
     })
-    .with_visuals(visuals())
     .resizable(true)
-    .min_size((760, 500));
+    .min_size((920, 620))
+    .keyboard_passthrough(true);
 
     Box::new(editor)
 }
 
-fn header(ui: &mut egui::Ui, state: &PluginContext<BufferUppercutParams>) {
-    ui.horizontal(|ui| {
-        ui.set_height(88.0);
-        ui.vertical(|ui| {
-            ui.label(
-                RichText::new("BUFFER UPPERCUT")
-                    .size(25.0)
-                    .strong()
-                    .color(Color32::WHITE),
-            );
-            ui.label(
-                RichText::new("TRUCE · NATIVE EGUI PREVIEW")
-                    .size(11.0)
-                    .color(ACCENT),
-            );
-        });
-        ui.add_space(300.0);
-        param_knob(ui, state, PARAM_PERFORMANCE_PITCH_ID, "Pitch");
-
-        let transport = state.transport();
-        let bpm = transport.map_or("--".to_owned(), |t| format!("{:.1}", t.tempo));
-        ui.vertical(|ui| {
-            ui.label(RichText::new(bpm).size(20.0).strong());
-            ui.label(
-                RichText::new("HOST BPM")
-                    .small()
-                    .color(Color32::from_gray(150)),
-            );
-        });
-    });
-}
-
-fn pads(ui: &mut egui::Ui, state: &PluginContext<BufferUppercutParams>, selected_pad: &mut usize) {
-    egui::Grid::new("performance-pad-grid")
-        .num_columns(4)
-        .spacing([8.0, 8.0])
-        .show(ui, |ui| {
-            for pad in 0..NUM_PADS {
-                let selected = *selected_pad == pad;
-                let trigger_held = state.get_param(pad_trigger_id(pad)) >= 0.5;
-                let midi_held = state.params().midi_held_pad_bits() & (1 << pad) != 0;
-                let held = trigger_held || midi_held;
-                Frame::NONE
-                    .fill(if held {
-                        ACCENT
-                    } else if selected {
-                        Color32::from_rgb(63, 48, 44)
-                    } else {
-                        Color32::from_rgb(48, 52, 60)
-                    })
-                    .stroke(Stroke::new(
-                        1.0_f32,
-                        if selected || held { ACCENT } else { PANEL },
-                    ))
-                    .corner_radius(CornerRadius::same(7))
-                    .inner_margin(Margin::symmetric(7, 6))
-                    .show(ui, |ui| {
-                        ui.set_min_width(74.0);
-                        if ui
-                            .selectable_label(selected, format!("{:02}", pad + 1))
-                            .clicked()
-                        {
-                            *selected_pad = pad;
-                        }
-                        param_toggle(ui, state, pad_trigger_id(pad), "Trigger");
-                    });
-                if pad % 4 == 3 {
-                    ui.end_row();
-                }
-            }
-        });
-}
-
-fn selected_pad_controls(
-    ui: &mut egui::Ui,
-    state: &PluginContext<BufferUppercutParams>,
-    selected_pad: usize,
-) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!("PAD {:02}", selected_pad + 1))
-                .size(18.0)
-                .strong(),
+fn apply_kit(state: &PluginContext<BufferUppercutParams>, kit: &Kit, selected_pad: &Cell<usize>) {
+    state.automate(
+        PARAM_PERFORMANCE_PITCH_ID,
+        (kit.state.performance_pitch.clamp(-24.0, 24.0) + 24.0) / 48.0,
+    );
+    for pad in 0..NUM_PADS {
+        state.automate(pad_trigger_id(pad), 0.0);
+        state.automate(
+            pad_type_id(pad),
+            truce::core::cast::discrete_norm(
+                kit.state.pads[pad].effect_type as usize,
+                EFFECT_COUNT,
+            ),
         );
-        ui.label(RichText::new(format!("MIDI {}", selected_pad + 60)).color(ACCENT));
-    });
-    ui.add_space(8.0);
-    param_dropdown(ui, state, pad_type_id(selected_pad), "Effect", 2);
-    ui.separator();
-    ui.label(RichText::new("MACROS").strong());
-    ui.add_space(4.0);
-    let effect_index = state
+        for control in 0..NUM_MACROS {
+            state.automate(
+                pad_control_id(pad, control),
+                kit.state.pads[pad].macros[control].clamp(0.0, 1.0),
+            );
+        }
+    }
+    state.params().set_kit_name(&kit.name);
+    state.params().request_kit_reset();
+    selected_pad.set(0);
+}
+
+fn capture_kit(params: &BufferUppercutParams, name: String) -> Kit {
+    debug_assert_eq!(NUM_PADS, DSP_NUM_PADS);
+    debug_assert_eq!(NUM_MACROS, DSP_NUM_MACROS);
+    let mut performance = PerformanceState::default();
+    for pad in 0..NUM_PADS {
+        let effect = params
+            .get_plain(pad_type_id(pad))
+            .unwrap_or_default()
+            .round() as i32;
+        let mut config = PadConfig {
+            effect_type: EffectType::from_index(effect),
+            ..PadConfig::default()
+        };
+        for control in 0..NUM_MACROS {
+            config.macros[control] = params
+                .get_plain(pad_control_id(pad, control))
+                .unwrap_or_default()
+                .clamp(0.0, 1.0);
+        }
+        performance.pads[pad] = config;
+    }
+    Kit {
+        name,
+        state: performance,
+    }
+}
+
+fn read_kit(path: &Path) -> Result<Kit, String> {
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+    if metadata.len() > MAX_KIT_FILE_BYTES as u64 {
+        return Err("preset exceeds 4096 bytes".to_owned());
+    }
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    decode(&bytes).map_err(|error| error.to_string())
+}
+
+fn kit_name_from_path(path: &Path) -> String {
+    path.file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Untitled Kit")
+        .to_owned()
+}
+
+fn configured_editor_size() -> (u32, u32) {
+    std::env::var("BUFFER_UPPERCUT_EDITOR_SIZE")
+        .ok()
+        .and_then(|value| parse_editor_size(&value))
+        .unwrap_or(DEFAULT_EDITOR_SIZE)
+}
+
+fn parse_editor_size(value: &str) -> Option<(u32, u32)> {
+    let (width, height) = value.split_once('x')?;
+    let width = width.parse().ok()?;
+    let height = height.parse().ok()?;
+    (width >= 920 && height >= 620).then_some((width, height))
+}
+
+fn selected_effect(state: &PluginContext<BufferUppercutParams>, pad: usize) -> EffectType {
+    let index = state
         .params()
-        .get_plain(pad_type_id(selected_pad))
+        .get_plain(pad_type_id(pad))
         .unwrap_or_default()
         .round() as i32;
-    let effect_type = EffectType::from_index(effect_index);
-    egui::Grid::new("selected-pad-macros")
-        .num_columns(4)
-        .spacing([8.0, 6.0])
-        .show(ui, |ui| {
-            for control in 0..NUM_MACROS {
-                let id = pad_control_id(selected_pad, control);
-                let normalized = state.params().get_plain(id).unwrap_or_default();
-                let value_text = format_control_value(effect_type, control, normalized);
-                ui.add_enabled_ui(effect_type.is_control_enabled(control), |ui| {
-                    param_knob_with_value_text(
-                        ui,
-                        state,
-                        id,
-                        effect_type.control_name(control),
-                        &value_text,
-                    );
-                });
-                if control % 4 == 3 {
-                    ui.end_row();
-                }
-            }
-        });
+    EffectType::from_index(index)
 }
 
-fn visuals() -> egui::Visuals {
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = SURFACE;
-    visuals.window_fill = SURFACE;
-    visuals.selection.bg_fill = ACCENT;
-    visuals.widgets.active.bg_fill = ACCENT;
-    visuals.widgets.hovered.bg_fill = Color32::from_rgb(216, 86, 47);
-    visuals
+fn valid_pad_index(index: i32) -> usize {
+    index.clamp(0, NUM_PADS as i32 - 1) as usize
+}
+
+fn valid_macro_index(index: i32) -> Option<usize> {
+    usize::try_from(index)
+        .ok()
+        .filter(|control| *control < NUM_MACROS)
+}
+
+fn empty_pad_view(pad: usize) -> PadView {
+    PadView {
+        number: SharedString::from(format!("{:02}", pad + 1)),
+        note: SharedString::from(format!("{}", pad + 60)),
+        effect: SharedString::default(),
+        held: false,
+        selected: pad == 0,
+    }
+}
+
+fn empty_macro_view(control: usize) -> MacroView {
+    MacroView {
+        label: SharedString::from(format!("{}", control + 1)),
+        value: 0.0,
+        value_text: SharedString::default(),
+        enabled: false,
+    }
+}
+
+fn effect_name(effect: EffectType) -> &'static str {
+    match effect {
+        EffectType::Off => "Off",
+        EffectType::BeatRepeat => "Beat Repeat",
+        EffectType::Reverse => "Reverse",
+        EffectType::TapeStop => "Tape Stop",
+        EffectType::Gate => "Gate",
+        EffectType::PitchDown => "Pitch Down",
+        EffectType::PitchReset => "Pitch Reset",
+        EffectType::PitchUp => "Pitch Up",
+        EffectType::BandLow => "Low Band",
+        EffectType::BandMid => "Mid Band",
+        EffectType::BandHigh => "High Band",
+        EffectType::LoFi => "LoFi",
+    }
+}
+
+fn effect_abbreviation(effect: EffectType) -> &'static str {
+    match effect {
+        EffectType::Off => "OFF",
+        EffectType::BeatRepeat => "REPEAT",
+        EffectType::Reverse => "REV",
+        EffectType::TapeStop => "STOP",
+        EffectType::Gate => "GATE",
+        EffectType::PitchDown => "PITCH -",
+        EffectType::PitchReset => "PITCH 0",
+        EffectType::PitchUp => "PITCH +",
+        EffectType::BandLow => "LO",
+        EffectType::BandMid => "MID",
+        EffectType::BandHigh => "HI",
+        EffectType::LoFi => "LOFI",
+    }
+}
+
+fn waveform_status(snapshot: &WaveformSnapshot) -> String {
+    let meta = snapshot.meta;
+    let duration = format!("{:.2}s", meta.duration_seconds.max(0.0));
+    match meta.mode {
+        VisualizationMode::Rolling => format!("STEREO HISTORY  ·  {duration}"),
+        VisualizationMode::Capture => {
+            let pad = meta
+                .active_pad
+                .map_or_else(|| "--".to_owned(), |pad| format!("{:02}", pad + 1));
+            let direction = if meta.reverse { "REV" } else { "FWD" };
+            format!(
+                "PAD {pad} / {}  ·  {direction} {:.2}x  ·  {duration}",
+                effect_abbreviation(meta.active_effect),
+                meta.play_rate
+            )
+        }
+    }
+}
+
+fn waveform_paths(bins: &[VisualizationBin]) -> (String, String) {
+    (
+        waveform_path(bins, |bin| (bin.min_l, bin.max_l)),
+        waveform_path(bins, |bin| (bin.min_r, bin.max_r)),
+    )
+}
+
+fn waveform_path(
+    bins: &[VisualizationBin],
+    channel: impl Fn(&VisualizationBin) -> (f32, f32),
+) -> String {
+    if bins.is_empty() {
+        return String::new();
+    }
+
+    let mut path = String::with_capacity(bins.len() * 28);
+    for (index, bin) in bins.iter().enumerate() {
+        let (_, max) = channel(bin);
+        let x = waveform_x(index, bins.len());
+        let y = waveform_y(max);
+        if index == 0 {
+            let _ = write!(path, "M {x:.2} {y:.2}");
+        } else {
+            let _ = write!(path, " L {x:.2} {y:.2}");
+        }
+    }
+    for (index, bin) in bins.iter().enumerate().rev() {
+        let (min, _) = channel(bin);
+        let _ = write!(
+            path,
+            " L {:.2} {:.2}",
+            waveform_x(index, bins.len()),
+            waveform_y(min)
+        );
+    }
+    path.push_str(" Z");
+    path
+}
+
+fn waveform_x(index: usize, count: usize) -> f32 {
+    if count <= 1 {
+        0.0
+    } else {
+        index as f32 * WAVEFORM_VIEWBOX_WIDTH / (count - 1) as f32
+    }
+}
+
+fn waveform_y(sample: f32) -> f32 {
+    WAVEFORM_VIEWBOX_HEIGHT * 0.5 - sample.clamp(-1.0, 1.0) * WAVEFORM_AMPLITUDE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_sizes_accept_supported_dimensions_only() {
+        assert_eq!(parse_editor_size("920x620"), Some((920, 620)));
+        assert_eq!(parse_editor_size("1440x760"), Some((1440, 760)));
+        assert_eq!(parse_editor_size("919x620"), None);
+        assert_eq!(parse_editor_size("wide"), None);
+    }
+
+    #[test]
+    fn waveform_geometry_is_closed_and_finite() {
+        let bins = [
+            VisualizationBin {
+                min_l: -1.0,
+                max_l: 1.0,
+                min_r: -0.5,
+                max_r: 0.5,
+            },
+            VisualizationBin::default(),
+        ];
+        let (left, right) = waveform_paths(&bins);
+        assert!(left.starts_with("M 0.00 6.00"));
+        assert!(left.ends_with(" Z"));
+        assert!(right.ends_with(" Z"));
+        assert!(!left.contains("NaN"));
+        assert!(!right.contains("NaN"));
+    }
 }

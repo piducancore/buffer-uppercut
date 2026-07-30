@@ -6,7 +6,7 @@
 //! Safe to delete this file (and the `standalone` feature + bin
 //! entry in Cargo.toml) if you don't want a standalone build.
 
-use buffer_uppercut_truce::Plugin;
+use buffer_uppercut::Plugin;
 
 fn main() {
     // `run::<Plugin>()` parses argv + `TRUCE_STANDALONE_*` env vars

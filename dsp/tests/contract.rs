@@ -6,7 +6,7 @@ use buffer_uppercut_dsp::{
 
 const ABSOLUTE_TOLERANCE: f64 = 1.0e-7;
 const RELATIVE_TOLERANCE: f64 = 1.0e-7;
-const PINNED_CPP_COMMIT: &str = "bc17659aa517b9910761c1861cadd873402b75de";
+const SEED_CPP_COMMIT: &str = "bc17659aa517b9910761c1861cadd873402b75de";
 
 #[derive(Default)]
 struct Fixture {
@@ -112,7 +112,7 @@ fn assert_close(name: &str, block: usize, frame: usize, channel: char, actual: f
 }
 
 #[test]
-fn matches_every_pinned_cpp_processing_fixture() {
+fn matches_every_frozen_processing_fixture() {
     let mut paths: Vec<_> = fs::read_dir(contract_dir())
         .unwrap()
         .map(|entry| entry.unwrap().path())
@@ -175,7 +175,7 @@ fn matches_every_pinned_cpp_processing_fixture() {
 }
 
 #[test]
-fn matches_pinned_cpp_pitch_action_fixture() {
+fn matches_frozen_pitch_action_fixture() {
     let text = fs::read_to_string(contract_dir().join("pitch-actions.budsp")).unwrap();
     let mut cases = 0;
     for line in text.lines() {
@@ -198,9 +198,9 @@ fn matches_pinned_cpp_pitch_action_fixture() {
 }
 
 #[test]
-fn contract_manifest_is_pinned_to_the_documented_cpp_engine() {
+fn contract_manifest_records_the_seed_corpus_provenance() {
     let manifest = fs::read_to_string(contract_dir().join("manifest.json")).unwrap();
-    assert!(manifest.contains(PINNED_CPP_COMMIT));
+    assert!(manifest.contains(SEED_CPP_COMMIT));
     assert!(manifest.contains("\"contract\": \"dsp-contract-v1\""));
     assert_eq!(manifest.matches("\"sha256\"").count(), 20);
 }

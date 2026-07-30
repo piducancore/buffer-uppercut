@@ -3,13 +3,17 @@ mod midi;
 mod params;
 
 use buffer_uppercut_dsp::{
-    EffectType, Engine, NUM_MACROS, NUM_PADS, PadConfig, PerformanceState, apply_pitch_action,
+    EffectType, Engine, NUM_MACROS, NUM_PADS, PadConfig, PerformanceState, VisualizationBin,
+    apply_pitch_action,
 };
 use truce::prelude64::*;
 
 pub use params::BufferUppercutParams;
+use params::NUM_VISUALIZATION_BINS;
 
-pub struct BufferUppercutTruce {
+const VISUALIZATION_REFRESH_HZ: f64 = 30.0;
+
+pub struct BufferUppercut {
     engine: Engine,
     input_l: Vec<f64>,
     input_r: Vec<f64>,
@@ -20,9 +24,13 @@ pub struct BufferUppercutTruce {
     performance_pitch: f64,
     last_parameter_pitch: f64,
     last_tempo: f64,
+    sample_rate: f64,
+    visualization_countdown: usize,
+    visualization_scratch: [VisualizationBin; NUM_VISUALIZATION_BINS],
+    kit_reset_sequence: u32,
 }
 
-impl Default for BufferUppercutTruce {
+impl Default for BufferUppercut {
     fn default() -> Self {
         Self {
             engine: Engine::default(),
@@ -35,11 +43,15 @@ impl Default for BufferUppercutTruce {
             performance_pitch: 0.0,
             last_parameter_pitch: 0.0,
             last_tempo: 120.0,
+            sample_rate: 44_100.0,
+            visualization_countdown: 0,
+            visualization_scratch: [VisualizationBin::default(); NUM_VISUALIZATION_BINS],
+            kit_reset_sequence: 0,
         }
     }
 }
 
-impl PluginLogic for BufferUppercutTruce {
+impl PluginLogic for BufferUppercut {
     type Params = BufferUppercutParams;
     type DspState = Self;
 
@@ -57,6 +69,13 @@ impl PluginLogic for BufferUppercutTruce {
             .unwrap_or_default()
             .clamp(-24.0, 24.0);
         state.last_parameter_pitch = state.performance_pitch;
+        state.sample_rate = config.sample_rate.max(1.0);
+        state.visualization_countdown = 0;
+        state.kit_reset_sequence = params.kit_reset_sequence();
+        let meta = state
+            .engine
+            .fill_visualization(state.last_tempo, &mut state.visualization_scratch);
+        params.publish_waveform(&state.visualization_scratch, meta);
     }
 
     fn process(
@@ -66,6 +85,11 @@ impl PluginLogic for BufferUppercutTruce {
         events: &EventList,
         context: &mut ProcessContext,
     ) -> ProcessStatus {
+        let kit_reset_sequence = params.kit_reset_sequence();
+        if kit_reset_sequence != state.kit_reset_sequence {
+            clear_transient_state(state, params);
+            state.kit_reset_sequence = kit_reset_sequence;
+        }
         state.last_tempo = context.transport.tempo.max(1.0);
         if let Some(pad) = midi::apply_events(&mut state.held_pads_by_channel, events) {
             params.record_midi_pad_press(pad);
@@ -132,6 +156,16 @@ impl PluginLogic for BufferUppercutTruce {
             state.last_tempo,
             &performance,
         );
+        if frames >= state.visualization_countdown {
+            let meta = state
+                .engine
+                .fill_visualization(state.last_tempo, &mut state.visualization_scratch);
+            params.publish_waveform(&state.visualization_scratch, meta);
+            state.visualization_countdown =
+                (state.sample_rate / VISUALIZATION_REFRESH_HZ).round() as usize;
+        } else {
+            state.visualization_countdown -= frames;
+        }
         zero_subnormals(&mut state.output_l[..frames]);
         zero_subnormals(&mut state.output_r[..frames]);
         {
@@ -147,17 +181,27 @@ impl PluginLogic for BufferUppercutTruce {
     }
 
     fn state_changed(state: &mut Self::DspState, params: &Self::Params) {
+        clear_transient_state(state, params);
         let restored_pitch = params
             .get_plain(params::PARAM_PERFORMANCE_PITCH_ID)
             .unwrap_or_default()
             .clamp(-24.0, 24.0);
         state.performance_pitch = restored_pitch;
         state.last_parameter_pitch = restored_pitch;
+        state.kit_reset_sequence = params.kit_reset_sequence();
     }
 
     fn editor(params: Arc<Self::Params>) -> Box<dyn Editor> {
         editor::create(params)
     }
+}
+
+fn clear_transient_state(state: &mut BufferUppercut, params: &BufferUppercutParams) {
+    state.engine.clear_transient();
+    state.held_pads_by_channel = [0; 16];
+    state.previous_held = [false; NUM_PADS];
+    params.set_midi_held_pad_bits(0);
+    state.visualization_countdown = 0;
 }
 
 fn zero_subnormals(samples: &mut [f64]) {
@@ -206,7 +250,7 @@ fn aggregate_midi_held(held_pads_by_channel: &[u16; 16]) -> u16 {
 }
 
 truce::plugin! {
-    logic: BufferUppercutTruce,
+    logic: BufferUppercut,
     params: BufferUppercutParams,
 }
 
@@ -249,8 +293,8 @@ mod tests {
     fn f64_wrapper_processes_audio_through_live_parameters() {
         let params = BufferUppercutParams::default();
         params.set_plain(params::pad_trigger_id(15), 1.0);
-        let mut state = BufferUppercutTruce::default();
-        <BufferUppercutTruce as PluginLogic>::reset(
+        let mut state = BufferUppercut::default();
+        <BufferUppercut as PluginLogic>::reset(
             &mut state,
             &params,
             &AudioConfig::new(48_000.0, 128),
@@ -271,7 +315,7 @@ mod tests {
         let mut context = ProcessContext::new(&transport, 48_000.0, 128, &mut output_events);
 
         assert_eq!(
-            <BufferUppercutTruce as PluginLogic>::process(
+            <BufferUppercut as PluginLogic>::process(
                 &mut state,
                 &params,
                 &mut buffer,
@@ -287,8 +331,8 @@ mod tests {
     #[test]
     fn midi_pitch_action_applies_once_on_the_held_transition() {
         let params = BufferUppercutParams::default();
-        let mut state = BufferUppercutTruce::default();
-        <BufferUppercutTruce as PluginLogic>::reset(
+        let mut state = BufferUppercut::default();
+        <BufferUppercut as PluginLogic>::reset(
             &mut state,
             &params,
             &AudioConfig::new(48_000.0, 32),
@@ -315,7 +359,7 @@ mod tests {
             let mut output_refs = [&mut output_l[..], &mut output_r[..]];
             let mut buffer = AudioBuffer::from_slices_checked(&input_refs, &mut output_refs, 32);
             let mut context = ProcessContext::new(&transport, 48_000.0, 32, &mut output_events);
-            <BufferUppercutTruce as PluginLogic>::process(
+            <BufferUppercut as PluginLogic>::process(
                 &mut state,
                 &params,
                 &mut buffer,
@@ -341,12 +385,12 @@ mod tests {
     fn restored_parameter_resynchronizes_internal_performance_pitch() {
         let params = BufferUppercutParams::default();
         params.set_plain(params::PARAM_PERFORMANCE_PITCH_ID, -7.0);
-        let mut state = BufferUppercutTruce {
+        let mut state = BufferUppercut {
             performance_pitch: 3.0,
             last_parameter_pitch: 3.0,
-            ..BufferUppercutTruce::default()
+            ..BufferUppercut::default()
         };
-        <BufferUppercutTruce as PluginLogic>::state_changed(&mut state, &params);
+        <BufferUppercut as PluginLogic>::state_changed(&mut state, &params);
         assert_eq!(state.performance_pitch, -7.0);
         assert_eq!(state.last_parameter_pitch, -7.0);
     }

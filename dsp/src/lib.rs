@@ -1,11 +1,37 @@
 //! Framework-independent Buffer Uppercut DSP.
 //!
-//! This is an independent Rust implementation of the behavior pinned by
-//! `contract/dsp-contract-v1.json`. Allocation is confined to [`Engine::reset`];
-//! [`Engine::process`] only mutates already-prepared storage.
+//! Behavior is protected by the repository's frozen regression corpus.
+//! Allocation is confined to [`Engine::reset`]; [`Engine::process`] only
+//! mutates already-prepared storage.
 
 pub const NUM_PADS: usize = 16;
 pub const NUM_MACROS: usize = 7;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum VisualizationMode {
+    #[default]
+    Rolling,
+    Capture,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct VisualizationBin {
+    pub min_l: f32,
+    pub max_l: f32,
+    pub min_r: f32,
+    pub max_r: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct VisualizationMeta {
+    pub mode: VisualizationMode,
+    pub active_pad: Option<usize>,
+    pub active_effect: EffectType,
+    pub normalized_playhead: f32,
+    pub reverse: bool,
+    pub play_rate: f32,
+    pub duration_seconds: f32,
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u8)]
@@ -575,6 +601,16 @@ impl Engine {
         self.buffer_l.resize(length, 0.0);
         self.buffer_r.clear();
         self.buffer_r.resize(length, 0.0);
+        self.clear_transient();
+    }
+
+    /// Clears captured audio and all held/effect history without resizing.
+    ///
+    /// This is safe to call from the process thread after a kit change: the
+    /// buffers retain their activation-time capacity and no allocation occurs.
+    pub fn clear_transient(&mut self) {
+        self.buffer_l.fill(0.0);
+        self.buffer_r.fill(0.0);
         self.write_pos = 0;
         self.repeat_active = false;
         self.repeat_phase = 0.0;
@@ -715,6 +751,131 @@ impl Engine {
     #[must_use]
     pub const fn history_bytes(&self) -> usize {
         self.buffer_l.len() * 2 * std::mem::size_of::<f64>()
+    }
+
+    /// Downsample the engine's current stereo history into caller-owned bins.
+    ///
+    /// When no buffer effect is active, the view contains the newest four
+    /// beats (limited by the available circular history). During a buffer
+    /// effect it contains the exact captured slice, independent of playback
+    /// direction. The returned playhead follows the actual read direction.
+    ///
+    /// This method is a read-only projection of prepared DSP storage: it does
+    /// not allocate, synchronize, or change processing state.
+    #[must_use]
+    pub fn fill_visualization(
+        &self,
+        tempo: f64,
+        bins: &mut [VisualizationBin],
+    ) -> VisualizationMeta {
+        let history_len = self.buffer_l.len().min(self.buffer_r.len());
+        let active = self.repeat_active && self.active_buffer_slot.is_some();
+
+        let (mode, start, sample_count) = if active {
+            let sample_count = (self.slice_samples.max(1) as usize).min(history_len);
+            (VisualizationMode::Capture, self.capture_start, sample_count)
+        } else {
+            let tempo = if tempo.is_finite() {
+                tempo.max(1.0)
+            } else {
+                120.0
+            };
+            let requested = (4.0 * self.sample_rate.max(1.0) * 60.0 / tempo).round() as usize;
+            let sample_count = requested.max(1).min(history_len);
+            (
+                VisualizationMode::Rolling,
+                self.wrap(self.write_pos as i64 - sample_count as i64),
+                sample_count,
+            )
+        };
+
+        self.fill_visualization_bins(start, sample_count, bins);
+
+        let duration_seconds = Self::finite_f32(sample_count as f64 / self.sample_rate.max(1.0));
+        if active {
+            let max_phase = (sample_count.saturating_sub(1)) as f64;
+            let phase = if self.repeat_phase.is_finite() {
+                self.repeat_phase.clamp(0.0, max_phase)
+            } else {
+                0.0
+            };
+            let read_phase = if self.repeat_reverse {
+                max_phase - phase
+            } else {
+                phase
+            };
+            let normalized_playhead = if max_phase > 0.0 {
+                Self::finite_f32((read_phase / max_phase).clamp(0.0, 1.0))
+            } else {
+                0.0
+            };
+
+            VisualizationMeta {
+                mode,
+                active_pad: self.active_buffer_slot,
+                active_effect: self.active_buffer_type,
+                normalized_playhead,
+                reverse: self.repeat_reverse,
+                play_rate: Self::finite_f32(self.play_rate),
+                duration_seconds,
+            }
+        } else {
+            VisualizationMeta {
+                mode,
+                active_pad: None,
+                active_effect: EffectType::Off,
+                normalized_playhead: 1.0,
+                reverse: false,
+                play_rate: 1.0,
+                duration_seconds,
+            }
+        }
+    }
+
+    fn fill_visualization_bins(
+        &self,
+        start: usize,
+        sample_count: usize,
+        bins: &mut [VisualizationBin],
+    ) {
+        if bins.is_empty() || sample_count == 0 || self.buffer_l.is_empty() {
+            return;
+        }
+
+        let bin_count = bins.len();
+        for (bin_index, bin) in bins.iter_mut().enumerate() {
+            let first_offset = bin_index * sample_count / bin_count;
+            let mut end_offset = (bin_index + 1) * sample_count / bin_count;
+            if end_offset <= first_offset {
+                end_offset = (first_offset + 1).min(sample_count);
+            }
+
+            let first_index = self.wrap(start as i64 + first_offset as i64);
+            let first_l = Self::finite_f32(self.buffer_l[first_index]);
+            let first_r = Self::finite_f32(self.buffer_r[first_index]);
+            let mut result = VisualizationBin {
+                min_l: first_l,
+                max_l: first_l,
+                min_r: first_r,
+                max_r: first_r,
+            };
+
+            for offset in first_offset + 1..end_offset {
+                let index = self.wrap(start as i64 + offset as i64);
+                let sample_l = Self::finite_f32(self.buffer_l[index]);
+                let sample_r = Self::finite_f32(self.buffer_r[index]);
+                result.min_l = result.min_l.min(sample_l);
+                result.max_l = result.max_l.max(sample_l);
+                result.min_r = result.min_r.min(sample_r);
+                result.max_r = result.max_r.max(sample_r);
+            }
+            *bin = result;
+        }
+    }
+
+    fn finite_f32(value: f64) -> f32 {
+        let value = value as f32;
+        if value.is_finite() { value } else { 0.0 }
     }
 
     fn update_press_order(&mut self, state: &PerformanceState) {
@@ -1087,7 +1248,7 @@ mod tests {
     }
 
     #[test]
-    fn mapping_helpers_match_reference_boundaries() {
+    fn mapping_helpers_match_canonical_boundaries() {
         assert_eq!(grid_index(-1.0), 0);
         assert_eq!(grid_index(1.0), 8);
         assert_eq!(lookback_index(2.0), 9);
@@ -1096,7 +1257,7 @@ mod tests {
     }
 
     #[test]
-    fn classic_state_has_all_effects_and_reference_repeat_presets() {
+    fn classic_state_has_all_effects_and_expected_repeat_presets() {
         let state = classic_state();
         assert_eq!(state.pads[0].effect_type, EffectType::BeatRepeat);
         assert_eq!(state.pads[15].effect_type, EffectType::LoFi);
@@ -1104,7 +1265,7 @@ mod tests {
     }
 
     #[test]
-    fn effect_control_metadata_matches_the_cpp_contract() {
+    fn effect_control_metadata_matches_the_product_contract() {
         let expected = [
             (EffectType::Off, 0, ["", "", "", "", "", "", ""]),
             (
@@ -1168,7 +1329,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_control_values_match_the_cpp_ui_contract() {
+    fn semantic_control_values_match_the_product_ui_contract() {
         assert_eq!(
             format_control_value(EffectType::BeatRepeat, 0, grid_normalized(2)),
             "1/16"
@@ -1296,6 +1457,148 @@ mod tests {
         state.held[1] = false;
         engine.process(&input, &input, &mut left, &mut right, 120.0, &state);
         assert_eq!(engine.active_buffer_slot(), Some(0));
+    }
+
+    #[test]
+    fn rolling_visualization_uses_the_newest_four_beats() {
+        let mut engine = Engine::new(1.0);
+        let input_l: Vec<f64> = (0..20).map(f64::from).collect();
+        let input_r: Vec<f64> = input_l.iter().map(|sample| -*sample).collect();
+        let mut output_l = vec![0.0; input_l.len()];
+        let mut output_r = vec![0.0; input_l.len()];
+        engine.process(
+            &input_l,
+            &input_r,
+            &mut output_l,
+            &mut output_r,
+            60.0,
+            &PerformanceState::default(),
+        );
+
+        let mut bins = [VisualizationBin::default(); 2];
+        let meta = engine.fill_visualization(60.0, &mut bins);
+
+        assert_eq!(
+            meta,
+            VisualizationMeta {
+                mode: VisualizationMode::Rolling,
+                active_pad: None,
+                active_effect: EffectType::Off,
+                normalized_playhead: 1.0,
+                reverse: false,
+                play_rate: 1.0,
+                duration_seconds: 4.0,
+            }
+        );
+        assert_eq!(
+            bins,
+            [
+                VisualizationBin {
+                    min_l: 16.0,
+                    max_l: 17.0,
+                    min_r: -17.0,
+                    max_r: -16.0,
+                },
+                VisualizationBin {
+                    min_l: 18.0,
+                    max_l: 19.0,
+                    min_r: -19.0,
+                    max_r: -18.0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn capture_visualization_handles_circular_wrap_and_reverse_playhead() {
+        let mut engine = Engine::new(16.0);
+        let input_l: Vec<f64> = (0..260).map(f64::from).collect();
+        let input_r: Vec<f64> = input_l.iter().map(|sample| *sample + 1_000.0).collect();
+        let mut output_l = vec![0.0; input_l.len()];
+        let mut output_r = vec![0.0; input_l.len()];
+        engine.process(
+            &input_l,
+            &input_r,
+            &mut output_l,
+            &mut output_r,
+            60.0,
+            &PerformanceState::default(),
+        );
+
+        let mut state = PerformanceState::default();
+        state.pads[3] = default_pad_config(EffectType::Reverse);
+        state.pads[3].macros[0] = grid_normalized(0);
+        state.held[3] = true;
+        engine.process(&[], &[], &mut [], &mut [], 60.0, &state);
+
+        let mut bins = [VisualizationBin::default(); 4];
+        let meta = engine.fill_visualization(60.0, &mut bins);
+
+        assert_eq!(meta.mode, VisualizationMode::Capture);
+        assert_eq!(meta.active_pad, Some(3));
+        assert_eq!(meta.active_effect, EffectType::Reverse);
+        assert_eq!(meta.normalized_playhead, 1.0);
+        assert!(meta.reverse);
+        assert_eq!(meta.play_rate, 1.0);
+        assert_eq!(meta.duration_seconds, 0.5);
+        assert_eq!(
+            bins,
+            [
+                VisualizationBin {
+                    min_l: 252.0,
+                    max_l: 253.0,
+                    min_r: 1_252.0,
+                    max_r: 1_253.0,
+                },
+                VisualizationBin {
+                    min_l: 254.0,
+                    max_l: 255.0,
+                    min_r: 1_254.0,
+                    max_r: 1_255.0,
+                },
+                VisualizationBin {
+                    min_l: 256.0,
+                    max_l: 257.0,
+                    min_r: 1_256.0,
+                    max_r: 1_257.0,
+                },
+                VisualizationBin {
+                    min_l: 258.0,
+                    max_l: 259.0,
+                    min_r: 1_258.0,
+                    max_r: 1_259.0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn visualization_sanitizes_non_finite_and_out_of_range_f32_samples() {
+        let mut engine = Engine::new(1.0);
+        let input_l = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX];
+        let input_r = [f64::MAX, f64::NEG_INFINITY, f64::INFINITY, f64::NAN];
+        let mut output_l = [0.0; 4];
+        let mut output_r = [0.0; 4];
+        engine.process(
+            &input_l,
+            &input_r,
+            &mut output_l,
+            &mut output_r,
+            60.0,
+            &PerformanceState::default(),
+        );
+
+        let mut bins = [VisualizationBin::default(); 8];
+        let meta = engine.fill_visualization(60.0, &mut bins);
+        assert!(meta.duration_seconds.is_finite());
+        assert!(meta.normalized_playhead.is_finite());
+        assert!(meta.play_rate.is_finite());
+        assert!(bins.iter().all(|bin| {
+            [bin.min_l, bin.max_l, bin.min_r, bin.max_r]
+                .into_iter()
+                .all(f32::is_finite)
+        }));
+        assert!(bins.iter().all(|bin| *bin == VisualizationBin::default()));
     }
 
     #[test]

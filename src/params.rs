@@ -1,11 +1,136 @@
-use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
+use std::sync::{Arc, RwLock};
 
+use buffer_uppercut_dsp::{
+    EffectType as DspEffectType, VisualizationBin, VisualizationMeta, VisualizationMode,
+};
 use truce::prelude::*;
 
 pub const NUM_PADS: usize = 16;
 pub const NUM_MACROS: usize = 7;
+pub const NUM_VISUALIZATION_BINS: usize = 256;
 pub const PAD_PARAMETER_STRIDE: u32 = 9;
 pub const PARAM_PERFORMANCE_PITCH_ID: u32 = 0;
+
+pub(crate) struct WaveformSnapshot {
+    pub bins: [VisualizationBin; NUM_VISUALIZATION_BINS],
+    pub meta: VisualizationMeta,
+    sequence: u32,
+}
+
+impl Default for WaveformSnapshot {
+    fn default() -> Self {
+        Self {
+            bins: [VisualizationBin::default(); NUM_VISUALIZATION_BINS],
+            meta: VisualizationMeta::default(),
+            sequence: 0,
+        }
+    }
+}
+
+struct WaveformBridge {
+    sequence: AtomicU32,
+    bins: [[AtomicU32; 4]; NUM_VISUALIZATION_BINS],
+    capture_mode: AtomicBool,
+    active_pad: AtomicU8,
+    active_effect: AtomicU8,
+    normalized_playhead: AtomicU32,
+    reverse: AtomicBool,
+    play_rate: AtomicU32,
+    duration_seconds: AtomicU32,
+}
+
+impl Default for WaveformBridge {
+    fn default() -> Self {
+        Self {
+            sequence: AtomicU32::new(0),
+            bins: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU32::new(0))),
+            capture_mode: AtomicBool::new(false),
+            active_pad: AtomicU8::new(u8::MAX),
+            active_effect: AtomicU8::new(DspEffectType::Off as u8),
+            normalized_playhead: AtomicU32::new(0.0_f32.to_bits()),
+            reverse: AtomicBool::new(false),
+            play_rate: AtomicU32::new(1.0_f32.to_bits()),
+            duration_seconds: AtomicU32::new(0.0_f32.to_bits()),
+        }
+    }
+}
+
+impl WaveformBridge {
+    fn publish(&self, bins: &[VisualizationBin; NUM_VISUALIZATION_BINS], meta: VisualizationMeta) {
+        self.sequence.fetch_add(1, Ordering::Release);
+        for (target, source) in self.bins.iter().zip(bins) {
+            target[0].store(source.min_l.to_bits(), Ordering::Relaxed);
+            target[1].store(source.max_l.to_bits(), Ordering::Relaxed);
+            target[2].store(source.min_r.to_bits(), Ordering::Relaxed);
+            target[3].store(source.max_r.to_bits(), Ordering::Relaxed);
+        }
+        self.capture_mode
+            .store(meta.mode == VisualizationMode::Capture, Ordering::Relaxed);
+        self.active_pad.store(
+            meta.active_pad
+                .and_then(|pad| u8::try_from(pad).ok())
+                .unwrap_or(u8::MAX),
+            Ordering::Relaxed,
+        );
+        self.active_effect
+            .store(meta.active_effect as u8, Ordering::Relaxed);
+        self.normalized_playhead
+            .store(meta.normalized_playhead.to_bits(), Ordering::Relaxed);
+        self.reverse.store(meta.reverse, Ordering::Relaxed);
+        self.play_rate
+            .store(meta.play_rate.to_bits(), Ordering::Relaxed);
+        self.duration_seconds
+            .store(meta.duration_seconds.to_bits(), Ordering::Relaxed);
+        self.sequence.fetch_add(1, Ordering::Release);
+    }
+
+    fn read(&self, snapshot: &mut WaveformSnapshot) -> bool {
+        for _ in 0..3 {
+            let before = self.sequence.load(Ordering::Acquire);
+            if before & 1 != 0 {
+                continue;
+            }
+            if before == snapshot.sequence {
+                return false;
+            }
+            for (target, source) in snapshot.bins.iter_mut().zip(&self.bins) {
+                *target = VisualizationBin {
+                    min_l: f32::from_bits(source[0].load(Ordering::Relaxed)),
+                    max_l: f32::from_bits(source[1].load(Ordering::Relaxed)),
+                    min_r: f32::from_bits(source[2].load(Ordering::Relaxed)),
+                    max_r: f32::from_bits(source[3].load(Ordering::Relaxed)),
+                };
+            }
+            snapshot.meta = VisualizationMeta {
+                mode: if self.capture_mode.load(Ordering::Relaxed) {
+                    VisualizationMode::Capture
+                } else {
+                    VisualizationMode::Rolling
+                },
+                active_pad: match self.active_pad.load(Ordering::Relaxed) {
+                    u8::MAX => None,
+                    pad => Some(usize::from(pad)),
+                },
+                active_effect: DspEffectType::from_index(i32::from(
+                    self.active_effect.load(Ordering::Relaxed),
+                )),
+                normalized_playhead: f32::from_bits(
+                    self.normalized_playhead.load(Ordering::Relaxed),
+                ),
+                reverse: self.reverse.load(Ordering::Relaxed),
+                play_rate: f32::from_bits(self.play_rate.load(Ordering::Relaxed)),
+                duration_seconds: f32::from_bits(self.duration_seconds.load(Ordering::Relaxed)),
+            };
+            let after = self.sequence.load(Ordering::Acquire);
+            if before == after {
+                snapshot.sequence = after;
+                return true;
+            }
+        }
+        false
+    }
+}
 
 #[derive(ParamEnum)]
 pub enum EffectType {
@@ -396,10 +521,16 @@ pub struct BufferUppercutParams {
     pad_15: Pad15Params,
     #[nested(base = 136)]
     pad_16: Pad16Params,
+    #[persist]
+    kit_name: RwLock<String>,
     #[skip]
     midi_held_pad_bits: AtomicU16,
     #[skip]
     midi_pad_press_event: AtomicU32,
+    #[skip]
+    kit_reset_sequence: AtomicU32,
+    #[skip]
+    waveform: Arc<WaveformBridge>,
 }
 
 #[must_use]
@@ -418,6 +549,38 @@ pub const fn pad_control_id(pad: usize, control: usize) -> u32 {
 }
 
 impl BufferUppercutParams {
+    pub(crate) fn kit_name(&self) -> String {
+        self.kit_name
+            .read()
+            .ok()
+            .map(|name| {
+                if name.is_empty() {
+                    "Classic".to_owned()
+                } else {
+                    name.clone()
+                }
+            })
+            .unwrap_or_else(|| "Classic".to_owned())
+    }
+
+    pub(crate) fn set_kit_name(&self, name: &str) {
+        if let Ok(mut kit_name) = self.kit_name.write() {
+            *kit_name = if name.is_empty() {
+                "Untitled Kit".to_owned()
+            } else {
+                name.to_owned()
+            };
+        }
+    }
+
+    pub(crate) fn request_kit_reset(&self) {
+        self.kit_reset_sequence.fetch_add(1, Ordering::Release);
+    }
+
+    pub(crate) fn kit_reset_sequence(&self) -> u32 {
+        self.kit_reset_sequence.load(Ordering::Acquire)
+    }
+
     pub(crate) fn set_midi_held_pad_bits(&self, bits: u16) {
         self.midi_held_pad_bits.store(bits, Ordering::Release);
     }
@@ -441,6 +604,18 @@ impl BufferUppercutParams {
         let pad = (encoded_pad != 0).then(|| encoded_pad as usize - 1);
         (event >> 8, pad)
     }
+
+    pub(crate) fn publish_waveform(
+        &self,
+        bins: &[VisualizationBin; NUM_VISUALIZATION_BINS],
+        meta: VisualizationMeta,
+    ) {
+        self.waveform.publish(bins, meta);
+    }
+
+    pub(crate) fn waveform_snapshot(&self, snapshot: &mut WaveformSnapshot) -> bool {
+        self.waveform.read(snapshot)
+    }
 }
 
 #[cfg(test)]
@@ -448,7 +623,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schema_matches_the_wrac_comparison_target() {
+    fn canonical_schema_has_145_stable_parameters() {
         let params = BufferUppercutParams::default();
         let infos = params.param_infos();
         assert_eq!(params.count(), 145);
@@ -469,6 +644,46 @@ mod tests {
         assert_eq!(params.midi_pad_press_event(), (1, Some(5)));
         params.record_midi_pad_press(15);
         assert_eq!(params.midi_pad_press_event(), (2, Some(15)));
+        assert_eq!(params.count(), 145);
+    }
+
+    #[test]
+    fn kit_name_is_persisted_without_becoming_a_parameter() {
+        let params = BufferUppercutParams::default();
+        params.set_kit_name("Tape Lab");
+        let persist = params.serialize_persist();
+
+        let restored = BufferUppercutParams::default();
+        restored.load_persist(&persist);
+        assert_eq!(restored.kit_name(), "Tape Lab");
+        assert_eq!(restored.count(), 145);
+    }
+
+    #[test]
+    fn waveform_bridge_publishes_complete_snapshots_without_parameters() {
+        let params = BufferUppercutParams::default();
+        let bins = [VisualizationBin {
+            min_l: -0.75,
+            max_l: 0.5,
+            min_r: -0.25,
+            max_r: 0.875,
+        }; NUM_VISUALIZATION_BINS];
+        let meta = VisualizationMeta {
+            mode: VisualizationMode::Capture,
+            active_pad: Some(6),
+            active_effect: DspEffectType::Reverse,
+            normalized_playhead: 0.625,
+            reverse: true,
+            play_rate: 0.5,
+            duration_seconds: 1.25,
+        };
+        params.publish_waveform(&bins, meta);
+
+        let mut snapshot = WaveformSnapshot::default();
+        assert!(params.waveform_snapshot(&mut snapshot));
+        assert_eq!(snapshot.bins, bins);
+        assert_eq!(snapshot.meta, meta);
+        assert!(!params.waveform_snapshot(&mut snapshot));
         assert_eq!(params.count(), 145);
     }
 

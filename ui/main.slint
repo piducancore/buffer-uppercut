@@ -1,0 +1,802 @@
+import "JetBrainsMono-Regular.ttf";
+
+export struct PadView {
+    number: string,
+    note: string,
+    effect: string,
+    held: bool,
+    selected: bool,
+}
+
+export struct MacroView {
+    label: string,
+    value: float,
+    value-text: string,
+    enabled: bool,
+}
+
+component BrutalSwitch inherits Rectangle {
+    in-out property <bool> checked: true;
+    in property <string> label: "";
+    callback toggled(bool);
+
+    height: 42px;
+    width: 176px;
+    background: #0a0a0a;
+    border-width: 2px;
+    border-color: root.checked ? #eaff00 : #676767;
+
+    HorizontalLayout {
+        padding: 7px;
+        spacing: 9px;
+
+        Rectangle {
+            width: 38px;
+            background: root.checked ? #eaff00 : #202020;
+            border-width: 1px;
+            border-color: root.checked ? #eaff00 : #676767;
+
+            Text {
+                text: root.checked ? "ON" : "OFF";
+                color: root.checked ? #080808 : #b7b4a9;
+                font-size: 10px;
+                font-weight: 800;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            text: root.label;
+            color: root.checked ? #f2efe4 : #858278;
+            font-size: 11px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+component BrutalButton inherits Rectangle {
+    in property <string> label: "";
+    callback clicked();
+
+    min-width: 0px;
+    height: 26px;
+    background: touch.pressed ? #eaff00 : #0a0a0a;
+    border-width: 1px;
+    border-color: touch.has-hover ? #eaff00 : #676767;
+
+    Text {
+        text: root.label;
+        color: touch.pressed ? #080808 : touch.has-hover ? #eaff00 : #f2efe4;
+        font-size: 9px;
+        font-weight: 900;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+component BrutalKnob inherits Rectangle {
+    in-out property <float> value: 0.0;
+    in property <string> value-text: "";
+    in property <string> label: "";
+    in property <bool> enabled: true;
+    callback edit-began();
+    callback value-changed(float);
+    callback edit-ended();
+
+    min-width: 0px;
+    min-height: 0px;
+    preferred-width: 82px;
+    preferred-height: 82px;
+    background: #0a0a0a;
+    border-width: 1px;
+    border-color: root.enabled ? #504f49 : #242424;
+    opacity: root.enabled ? 1.0 : 0.28;
+
+    property <float> angle: 135 + root.value * 270;
+
+    Path {
+        x: (parent.width - 50px) / 2;
+        y: 2px;
+        width: 50px;
+        height: 50px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 64;
+        viewbox-height: 64;
+        stroke: #3e3e3a;
+        stroke-width: 5px;
+
+        MoveTo { x: 32 + 27 * cos(135deg); y: 32 + 27 * sin(135deg); }
+        ArcTo {
+            x: 32 + 27 * cos(405deg);
+            y: 32 + 27 * sin(405deg);
+            radius-x: 27;
+            radius-y: 27;
+            sweep: true;
+            large-arc: true;
+        }
+    }
+
+    Path {
+        x: (parent.width - 50px) / 2;
+        y: 2px;
+        width: 50px;
+        height: 50px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 64;
+        viewbox-height: 64;
+        stroke: root.enabled ? #eaff00 : #3e3e3a;
+        stroke-width: 5px;
+
+        MoveTo { x: 32 + 27 * cos(135deg); y: 32 + 27 * sin(135deg); }
+        ArcTo {
+            x: 32 + 27 * cos(root.angle * 1deg);
+            y: 32 + 27 * sin(root.angle * 1deg);
+            radius-x: 27;
+            radius-y: 27;
+            sweep: true;
+            large-arc: root.value > 0.667;
+        }
+    }
+
+    Path {
+        x: (parent.width - 50px) / 2;
+        y: 2px;
+        width: 50px;
+        height: 50px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 64;
+        viewbox-height: 64;
+        stroke: #f2efe4;
+        stroke-width: 2px;
+
+        MoveTo { x: 32; y: 32; }
+        LineTo {
+            x: 32 + 18 * cos(root.angle * 1deg);
+            y: 32 + 18 * sin(root.angle * 1deg);
+        }
+    }
+
+    Text {
+        x: 3px;
+        y: 52px;
+        width: parent.width - 6px;
+        height: 15px;
+        text: root.enabled ? root.value-text : "—";
+        color: root.enabled ? #f2efe4 : #6b6962;
+        font-size: 10px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: 3px;
+        y: 66px;
+        width: parent.width - 6px;
+        height: 14px;
+        text: root.enabled ? root.label : "INACTIVE";
+        color: root.enabled ? #eaff00 : #5a5852;
+        font-size: 9px;
+        font-weight: 800;
+        horizontal-alignment: center;
+        overflow: elide;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        property <float> start-value: 0.0;
+        property <bool> editing: false;
+
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                self.start-value = root.value;
+                self.editing = true;
+                root.edit-began();
+            }
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.up && self.editing {
+                self.editing = false;
+                root.edit-ended();
+            }
+        }
+
+        moved => {
+            if self.pressed && self.editing {
+                root.value = clamp(
+                    self.start-value - (self.mouse-y - self.pressed-y) / 145px,
+                    0.0,
+                    1.0,
+                );
+                root.value-changed(root.value);
+            }
+        }
+    }
+}
+
+component PerformancePad inherits Rectangle {
+    in property <PadView> data;
+    in property <int> index;
+    callback pressed(int);
+    callback released(int);
+
+    min-width: 0px;
+    min-height: 0px;
+    preferred-width: 112px;
+    preferred-height: 58px;
+    background: touch.pressed || root.data.held
+        ? #eaff00
+        : root.data.selected ? #f2efe4 : #111111;
+    border-width: root.data.selected || root.data.held ? 3px : 1px;
+    border-color: root.data.held ? #eaff00 : root.data.selected ? #f2efe4 : #5a5953;
+
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 8px;
+
+        Text {
+            width: 32px;
+            text: root.data.number;
+            color: touch.pressed || root.data.held || root.data.selected ? #080808 : #f2efe4;
+            font-size: 20px;
+            font-weight: 900;
+            vertical-alignment: center;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 0px;
+
+            Text {
+                text: root.data.effect;
+                color: touch.pressed || root.data.held || root.data.selected ? #080808 : #eaff00;
+                font-size: 11px;
+                font-weight: 800;
+                overflow: elide;
+            }
+            Text {
+                text: "NOTE " + root.data.note;
+                color: touch.pressed || root.data.held || root.data.selected ? #292929 : #96938a;
+                font-size: 9px;
+                font-weight: 700;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.pressed(root.index);
+            }
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                root.released(root.index);
+            }
+        }
+    }
+}
+
+component EffectDropdown inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> current-index: 0;
+    callback changed(int);
+
+    height: 48px;
+    background: #0a0a0a;
+    border-width: 2px;
+    border-color: open ? #eaff00 : #f2efe4;
+    property <bool> open: false;
+
+    HorizontalLayout {
+        padding: 10px;
+
+        Text {
+            text: root.options.length > 0 ? root.options[root.current-index] : "OFF";
+            color: #f2efe4;
+            font-size: 13px;
+            font-weight: 800;
+            vertical-alignment: center;
+        }
+        Text {
+            width: 38px;
+            text: root.open ? "CLOSE" : "OPEN";
+            color: #eaff00;
+            font-size: 9px;
+            font-weight: 900;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.open = !root.open; }
+    }
+
+    if root.open: Rectangle {
+        y: root.height + 2px;
+        width: root.width;
+        height: 288px;
+        z: 200;
+        background: #080808;
+        border-width: 2px;
+        border-color: #eaff00;
+
+        VerticalLayout {
+            padding: 4px;
+            spacing: 0px;
+
+            for option[index] in root.options: Rectangle {
+                height: 23px;
+                background: choice.has-hover || index == root.current-index ? #eaff00 : #080808;
+
+                Text {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    text: option;
+                    color: choice.has-hover || index == root.current-index ? #080808 : #f2efe4;
+                    font-size: 10px;
+                    font-weight: 800;
+                    vertical-alignment: center;
+                }
+
+                choice := TouchArea {
+                    clicked => {
+                        root.current-index = index;
+                        root.open = false;
+                        root.changed(index);
+                    }
+                }
+            }
+        }
+    }
+}
+
+component WaveformPanel inherits Rectangle {
+    in property <string> left-path;
+    in property <string> right-path;
+    in property <float> playhead;
+    in property <string> mode;
+    in property <string> status;
+
+    background: #0a0a0a;
+    border-width: 2px;
+    border-color: #f2efe4;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 5px;
+
+        HorizontalLayout {
+            height: 20px;
+
+            Text {
+                text: "STEREO BUFFER MONITOR";
+                color: #f2efe4;
+                font-size: 11px;
+                font-weight: 900;
+            }
+            Text {
+                text: root.mode;
+                color: #eaff00;
+                font-size: 10px;
+                font-weight: 800;
+                horizontal-alignment: right;
+            }
+        }
+
+        Rectangle {
+            background: #050505;
+            border-width: 1px;
+            border-color: #353531;
+            vertical-stretch: 1;
+
+            for line in 4: Rectangle {
+                x: 0px;
+                y: (line + 1) * parent.height / 5;
+                width: parent.width;
+                height: 1px;
+                background: #292925;
+            }
+
+            Rectangle {
+                y: parent.height / 2;
+                width: parent.width;
+                height: 1px;
+                background: #77746b;
+            }
+
+            Rectangle {
+                x: root.playhead * (parent.width - 2px);
+                width: 2px;
+                height: parent.height;
+                background: #eaff00;
+            }
+
+            Path {
+                x: 0px;
+                y: 4px;
+                width: parent.width;
+                height: parent.height / 2 - 8px;
+                viewbox-x: 0;
+                viewbox-y: 0;
+                viewbox-width: 1000;
+                viewbox-height: 100;
+                commands: root.left-path;
+                fill: #eaff00;
+                stroke: #eaff00;
+                stroke-width: 0.8px;
+                opacity: 0.82;
+            }
+
+            Path {
+                x: 0px;
+                y: parent.height / 2 + 4px;
+                width: parent.width;
+                height: parent.height / 2 - 8px;
+                viewbox-x: 0;
+                viewbox-y: 0;
+                viewbox-width: 1000;
+                viewbox-height: 100;
+                commands: root.right-path;
+                fill: #f2efe4;
+                stroke: #f2efe4;
+                stroke-width: 0.8px;
+                opacity: 0.72;
+            }
+
+            Text {
+                x: 8px;
+                y: 6px;
+                text: "L";
+                color: #eaff00;
+                font-size: 9px;
+                font-weight: 900;
+            }
+            Text {
+                x: 8px;
+                y: parent.height / 2 + 6px;
+                text: "R";
+                color: #f2efe4;
+                font-size: 9px;
+                font-weight: 900;
+            }
+        }
+
+        Text {
+            height: 16px;
+            text: root.status;
+            color: #99968c;
+            font-size: 9px;
+            font-weight: 700;
+            overflow: elide;
+        }
+    }
+}
+
+export component BufferUppercutUi inherits Window {
+    min-width: 920px;
+    min-height: 620px;
+    preferred-width: 1120px;
+    preferred-height: 700px;
+    background: #080808;
+    default-font-family: "JetBrains Mono";
+
+    in property <[PadView]> pads;
+    in property <[MacroView]> macros;
+    in property <[string]> effect-options;
+    in property <int> selected-pad: 0;
+    in property <string> selected-pad-note: "MIDI 60";
+    in property <int> effect-index: 0;
+    in property <string> effect-name: "Off";
+    in property <string> tempo-text: "--.-";
+    in-out property <bool> auto-select: true;
+    in property <float> pitch-value: 0.5;
+    in property <string> pitch-text: "0 st";
+    in property <string> waveform-left: "";
+    in property <string> waveform-right: "";
+    in property <float> waveform-playhead: 1.0;
+    in property <string> waveform-mode: "ROLLING / 4 BEATS";
+    in property <string> waveform-status: "STEREO HISTORY";
+    in property <string> kit-display: "Classic";
+
+    callback previous-kit();
+    callback next-kit();
+    callback load-kit();
+    callback save-kit();
+    callback pitch-edit-began();
+    callback pitch-value-changed(float);
+    callback pitch-edit-ended();
+    callback auto-select-toggled(bool);
+    callback pad-pressed(int);
+    callback pad-released(int);
+    callback effect-changed(int);
+    callback macro-edit-began(int);
+    callback macro-value-changed(int, float);
+    callback macro-edit-ended(int);
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 7px;
+
+        Rectangle {
+            height: 96px;
+            background: #0a0a0a;
+            border-width: 2px;
+            border-color: #f2efe4;
+
+            HorizontalLayout {
+                padding: 7px;
+                spacing: 12px;
+
+                VerticalLayout {
+                    width: 365px;
+                    spacing: 3px;
+
+                    Text {
+                        text: "BUFFER UPPERCUT";
+                        color: #f2efe4;
+                        font-size: 28px;
+                        font-weight: 900;
+                    }
+                    HorizontalLayout {
+                        height: 27px;
+                        spacing: 4px;
+
+                        BrutalButton {
+                            width: 28px;
+                            label: "<";
+                            clicked => { root.previous-kit(); }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            background: #111111;
+                            border-width: 1px;
+                            border-color: #676767;
+
+                            Text {
+                                x: 7px;
+                                width: parent.width - 14px;
+                                text: root.kit-display;
+                                color: #eaff00;
+                                font-size: 9px;
+                                font-weight: 900;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        BrutalButton {
+                            width: 28px;
+                            label: ">";
+                            clicked => { root.next-kit(); }
+                        }
+                        BrutalButton {
+                            width: 46px;
+                            label: "LOAD";
+                            clicked => { root.load-kit(); }
+                        }
+                        BrutalButton {
+                            width: 46px;
+                            label: "SAVE";
+                            clicked => { root.save-kit(); }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 150px;
+                    background: #eaff00;
+
+                    VerticalLayout {
+                        padding: 7px;
+                        spacing: 0px;
+
+                        Text {
+                            text: root.tempo-text;
+                            color: #080808;
+                            font-size: 25px;
+                            font-weight: 900;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "HOST BPM";
+                            color: #080808;
+                            font-size: 9px;
+                            font-weight: 900;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                BrutalSwitch {
+                    checked: root.auto-select;
+                    label: "AUTO-SELECT MIDI";
+                    toggled(value) => {
+                        root.auto-select = value;
+                        root.auto-select-toggled(value);
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; background: transparent; }
+
+                BrutalKnob {
+                    width: 86px;
+                    height: 82px;
+                    value: root.pitch-value;
+                    value-text: root.pitch-text;
+                    label: "PERF PITCH";
+                    edit-began => { root.pitch-edit-began(); }
+                    value-changed(value) => { root.pitch-value-changed(value); }
+                    edit-ended => { root.pitch-edit-ended(); }
+                }
+            }
+        }
+
+        WaveformPanel {
+            min-height: 135px;
+            vertical-stretch: 2;
+            left-path: root.waveform-left;
+            right-path: root.waveform-right;
+            playhead: root.waveform-playhead;
+            mode: root.waveform-mode;
+            status: root.waveform-status;
+        }
+
+        HorizontalLayout {
+            min-height: 314px;
+            vertical-stretch: 3;
+            spacing: 11px;
+
+            Rectangle {
+                horizontal-stretch: 5;
+                background: #0a0a0a;
+                border-width: 2px;
+                border-color: #f2efe4;
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        height: 20px;
+                        Text {
+                            text: "PERFORMANCE PADS";
+                            color: #f2efe4;
+                            font-size: 11px;
+                            font-weight: 900;
+                        }
+                        Text {
+                            text: "MIDI 60—75 / MOMENTARY";
+                            color: #77746b;
+                            font-size: 9px;
+                            font-weight: 700;
+                            horizontal-alignment: right;
+                        }
+                    }
+
+                    Rectangle {
+                        background: transparent;
+                        min-height: 0px;
+                        vertical-stretch: 1;
+
+                        for pad[index] in root.pads: PerformancePad {
+                            x: Math.mod(index, 4) * (parent.width + 7px) / 4;
+                            y: Math.floor(index / 4) * (parent.height + 7px) / 4;
+                            width: (parent.width - 21px) / 4;
+                            height: (parent.height - 21px) / 4;
+                            data: pad;
+                            index: index;
+                            pressed(index) => { root.pad-pressed(index); }
+                            released(index) => { root.pad-released(index); }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 4;
+                background: #0a0a0a;
+                border-width: 2px;
+                border-color: #f2efe4;
+
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        height: 28px;
+
+                        Text {
+                            text: "PAD " + (root.selected-pad + 1);
+                            color: #f2efe4;
+                            font-size: 18px;
+                            font-weight: 900;
+                        }
+                        Text {
+                            text: root.selected-pad-note;
+                            color: #eaff00;
+                            font-size: 10px;
+                            font-weight: 800;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    EffectDropdown {
+                        options: root.effect-options;
+                        current-index: root.effect-index;
+                        changed(index) => { root.effect-changed(index); }
+                    }
+
+                    HorizontalLayout {
+                        height: 18px;
+                        Text {
+                            text: root.effect-name;
+                            color: #eaff00;
+                            font-size: 10px;
+                            font-weight: 900;
+                        }
+                        Text {
+                            text: "CONTEXTUAL MACROS";
+                            color: #77746b;
+                            font-size: 9px;
+                            font-weight: 700;
+                            horizontal-alignment: right;
+                        }
+                    }
+
+                    Rectangle {
+                        background: transparent;
+                        min-height: 0px;
+                        vertical-stretch: 1;
+
+                        for macro[index] in root.macros: BrutalKnob {
+                            x: Math.mod(index, 4) * (parent.width + 7px) / 4;
+                            y: Math.floor(index / 4) * (parent.height + 7px) / 2;
+                            width: (parent.width - 21px) / 4;
+                            height: (parent.height - 7px) / 2;
+                            value: macro.value;
+                            value-text: macro.value-text;
+                            label: macro.label;
+                            enabled: macro.enabled;
+                            edit-began => { root.macro-edit-began(index); }
+                            value-changed(value) => { root.macro-value-changed(index, value); }
+                            edit-ended => { root.macro-edit-ended(index); }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            height: 18px;
+
+            Text {
+                text: "DSP F64 / PARAMS 145 / MIDI AGGREGATED";
+                color: #6c6962;
+                font-size: 9px;
+                font-weight: 700;
+            }
+            Text {
+                text: "BUFFER UPPERCUT // LIVE";
+                color: #eaff00;
+                font-size: 9px;
+                font-weight: 900;
+                horizontal-alignment: right;
+            }
+        }
+    }
+}
