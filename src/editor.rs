@@ -1,17 +1,10 @@
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
-use std::fs;
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use buffer_uppercut_dsp::{
-    EffectType, NUM_MACROS as DSP_NUM_MACROS, NUM_PADS as DSP_NUM_PADS, PadConfig,
-    PerformanceState, VisualizationBin, VisualizationMode, format_control_value,
-};
-use buffer_uppercut_kit::{
-    FACTORY_KIT_COUNT, KIT_EXTENSION, Kit, MAX_KIT_FILE_BYTES, decode, encode, factory_kit,
-};
+use buffer_uppercut_dsp::{EffectType, VisualizationBin, VisualizationMode, format_control_value};
+use buffer_uppercut_kit::{FACTORY_KIT_COUNT, Kit, factory_kit};
 use truce::core::editor::PluginContextReadF32;
 use truce::prelude::{Editor, Params, PluginContext};
 use truce_slint::SlintEditor;
@@ -27,16 +20,29 @@ include_modules!();
 const EFFECT_COUNT: usize = 12;
 const DEFAULT_EDITOR_SIZE: (u32, u32) = (1120, 700);
 const WAVEFORM_VIEWBOX_WIDTH: f32 = 1000.0;
-const WAVEFORM_VIEWBOX_HEIGHT: f32 = 100.0;
-const WAVEFORM_AMPLITUDE: f32 = 44.0;
+const WAVEFORM_VIEWBOX_HEIGHT: f32 = 32.0;
+const WAVEFORM_AMPLITUDE: f32 = 14.0;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EditorPreview {
+    Captured,
+}
+
+impl EditorPreview {
+    const fn held_pad(self) -> usize {
+        match self {
+            Self::Captured => 1,
+        }
+    }
+}
 
 pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
     let editor = SlintEditor::new(params, configured_editor_size(), move |state| {
         let ui = BufferUppercutUi::new().expect("create Buffer Uppercut Slint editor");
-        let selected_pad = Rc::new(Cell::new(0_usize));
+        let editor_preview = configured_editor_preview();
+        let selected_pad = Rc::new(Cell::new(editor_preview.map_or(0, EditorPreview::held_pad)));
         let auto_select_midi = Rc::new(Cell::new(true));
         let factory_kit_index = Rc::new(Cell::new(Some(0_usize)));
-        let kit_status = Rc::new(RefCell::new(String::new()));
         let last_midi_press_sequence = Rc::new(Cell::new(state.params().midi_pad_press_event().0));
         let active_macro_gestures: Rc<[Cell<Option<u32>>; NUM_MACROS]> =
             Rc::new(std::array::from_fn(|_| Cell::new(None)));
@@ -56,6 +62,7 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         ui.set_pads(ModelRc::from(pads.clone()));
         ui.set_macros(ModelRc::from(macros.clone()));
         ui.set_effect_options(ModelRc::from(effect_options));
+        apply_editor_preview(&ui, editor_preview);
 
         {
             let state = state.clone();
@@ -79,7 +86,6 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
             let state = state.clone();
             let selected_pad = selected_pad.clone();
             let factory_kit_index = factory_kit_index.clone();
-            let kit_status = kit_status.clone();
             ui.on_previous_kit(move || {
                 let index = factory_kit_index
                     .get()
@@ -88,73 +94,16 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                     % FACTORY_KIT_COUNT;
                 apply_kit(&state, &factory_kit(index), &selected_pad);
                 factory_kit_index.set(Some(index));
-                kit_status.borrow_mut().clear();
             });
         }
         {
             let state = state.clone();
             let selected_pad = selected_pad.clone();
             let factory_kit_index = factory_kit_index.clone();
-            let kit_status = kit_status.clone();
             ui.on_next_kit(move || {
                 let index = (factory_kit_index.get().unwrap_or(0) + 1) % FACTORY_KIT_COUNT;
                 apply_kit(&state, &factory_kit(index), &selected_pad);
                 factory_kit_index.set(Some(index));
-                kit_status.borrow_mut().clear();
-            });
-        }
-        {
-            let state = state.clone();
-            let selected_pad = selected_pad.clone();
-            let factory_kit_index = factory_kit_index.clone();
-            let kit_status = kit_status.clone();
-            ui.on_load_kit(move || {
-                let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Buffer Uppercut preset", &[KIT_EXTENSION])
-                    .pick_file()
-                else {
-                    return;
-                };
-                match read_kit(&path) {
-                    Ok(mut kit) => {
-                        // Portable kit files intentionally do not change the
-                        // performance pitch; it is performance state rather
-                        // than part of a reusable kit.
-                        kit.state.performance_pitch = 0.0;
-                        apply_kit(&state, &kit, &selected_pad);
-                        factory_kit_index.set(None);
-                        kit_status.borrow_mut().clear();
-                    }
-                    Err(error) => {
-                        *kit_status.borrow_mut() = format!("LOAD ERROR / {error}");
-                    }
-                }
-            });
-        }
-        {
-            let state = state.clone();
-            let kit_status = kit_status.clone();
-            ui.on_save_kit(move || {
-                let current_name = state.params().kit_name();
-                let suggested_name = format!("{current_name}.{KIT_EXTENSION}");
-                let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Buffer Uppercut preset", &[KIT_EXTENSION])
-                    .set_file_name(&suggested_name)
-                    .save_file()
-                else {
-                    return;
-                };
-                let name = kit_name_from_path(&path);
-                let kit = capture_kit(state.params(), name.clone());
-                match fs::write(&path, encode(&kit)) {
-                    Ok(()) => {
-                        state.params().set_kit_name(&name);
-                        kit_status.borrow_mut().clear();
-                    }
-                    Err(error) => {
-                        *kit_status.borrow_mut() = format!("SAVE ERROR / {error}");
-                    }
-                }
             });
         }
         {
@@ -238,12 +187,7 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
             let selected = selected_pad.get().min(NUM_PADS - 1);
             ui.set_selected_pad(selected as i32);
             ui.set_auto_select(auto_select_midi.get());
-            let status = kit_status.borrow();
-            ui.set_kit_display(SharedString::from(if status.is_empty() {
-                state.params().kit_name()
-            } else {
-                status.clone()
-            }));
+            ui.set_kit_display(SharedString::from(state.params().kit_name()));
 
             let transport = state.transport();
             let tempo = transport.map_or_else(
@@ -268,7 +212,9 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                         number: SharedString::from(format!("{:02}", pad + 1)),
                         note: SharedString::from(format!("{}", pad + 60)),
                         effect: SharedString::from(effect_abbreviation(effect)),
-                        held: trigger_held || midi_held_bits & (1_u16 << pad) != 0,
+                        held: trigger_held
+                            || midi_held_bits & (1_u16 << pad) != 0
+                            || editor_preview.is_some_and(|preview| preview.held_pad() == pad),
                         selected: pad == selected,
                     },
                 );
@@ -302,6 +248,7 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                 ui.set_waveform_left(SharedString::from(left));
                 ui.set_waveform_right(SharedString::from(right));
                 ui.set_waveform_playhead(waveform.meta.normalized_playhead.clamp(0.0, 1.0));
+                ui.set_waveform_captured(waveform.meta.mode == VisualizationMode::Capture);
                 ui.set_waveform_mode(SharedString::from(match waveform.meta.mode {
                     VisualizationMode::Rolling => "ROLLING / 4 BEATS",
                     VisualizationMode::Capture => "CAPTURED CELL",
@@ -343,55 +290,55 @@ fn apply_kit(state: &PluginContext<BufferUppercutParams>, kit: &Kit, selected_pa
     selected_pad.set(0);
 }
 
-fn capture_kit(params: &BufferUppercutParams, name: String) -> Kit {
-    debug_assert_eq!(NUM_PADS, DSP_NUM_PADS);
-    debug_assert_eq!(NUM_MACROS, DSP_NUM_MACROS);
-    let mut performance = PerformanceState::default();
-    for pad in 0..NUM_PADS {
-        let effect = params
-            .get_plain(pad_type_id(pad))
-            .unwrap_or_default()
-            .round() as i32;
-        let mut config = PadConfig {
-            effect_type: EffectType::from_index(effect),
-            ..PadConfig::default()
-        };
-        for control in 0..NUM_MACROS {
-            config.macros[control] = params
-                .get_plain(pad_control_id(pad, control))
-                .unwrap_or_default()
-                .clamp(0.0, 1.0);
-        }
-        performance.pads[pad] = config;
-    }
-    Kit {
-        name,
-        state: performance,
-    }
-}
-
-fn read_kit(path: &Path) -> Result<Kit, String> {
-    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
-    if metadata.len() > MAX_KIT_FILE_BYTES as u64 {
-        return Err("preset exceeds 4096 bytes".to_owned());
-    }
-    let bytes = fs::read(path).map_err(|error| error.to_string())?;
-    decode(&bytes).map_err(|error| error.to_string())
-}
-
-fn kit_name_from_path(path: &Path) -> String {
-    path.file_stem()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("Untitled Kit")
-        .to_owned()
-}
-
 fn configured_editor_size() -> (u32, u32) {
     std::env::var("BUFFER_UPPERCUT_EDITOR_SIZE")
         .ok()
         .and_then(|value| parse_editor_size(&value))
         .unwrap_or(DEFAULT_EDITOR_SIZE)
+}
+
+fn configured_editor_preview() -> Option<EditorPreview> {
+    std::env::var("BUFFER_UPPERCUT_EDITOR_PREVIEW")
+        .ok()
+        .and_then(|value| parse_editor_preview(&value))
+}
+
+fn parse_editor_preview(value: &str) -> Option<EditorPreview> {
+    match value {
+        "captured" => Some(EditorPreview::Captured),
+        _ => None,
+    }
+}
+
+fn apply_editor_preview(ui: &BufferUppercutUi, preview: Option<EditorPreview>) {
+    let Some(EditorPreview::Captured) = preview else {
+        return;
+    };
+
+    let mut bins = [VisualizationBin::default(); crate::params::NUM_VISUALIZATION_BINS];
+    let bin_count = bins.len() as f32;
+    for (index, bin) in bins.iter_mut().enumerate() {
+        let phase = index as f32 / (bin_count - 1.0);
+        let envelope = (1.0 - phase).powf(0.72) * 0.78 + 0.08;
+        let carrier = (phase * 83.0).sin() * 0.58 + (phase * 29.0).sin() * 0.24;
+        let side = (phase * 67.0 + 0.9).sin() * 0.5 + (phase * 17.0).sin() * 0.22;
+        let left = carrier * envelope;
+        let right = side * envelope;
+        bin.min_l = (left - envelope * 0.16).clamp(-1.0, 1.0);
+        bin.max_l = (left + envelope * 0.16).clamp(-1.0, 1.0);
+        bin.min_r = (right - envelope * 0.14).clamp(-1.0, 1.0);
+        bin.max_r = (right + envelope * 0.14).clamp(-1.0, 1.0);
+    }
+
+    let (left, right) = waveform_paths(&bins);
+    ui.set_waveform_left(SharedString::from(left));
+    ui.set_waveform_right(SharedString::from(right));
+    ui.set_waveform_playhead(0.64);
+    ui.set_waveform_captured(true);
+    ui.set_waveform_mode(SharedString::from("CAPTURED CELL"));
+    ui.set_waveform_status(SharedString::from(
+        "PAD 02 / REPEAT  ·  FWD 0.50x  ·  0.50s",
+    ));
 }
 
 fn parse_editor_size(value: &str) -> Option<(u32, u32)> {
@@ -556,6 +503,16 @@ mod tests {
     }
 
     #[test]
+    fn configured_preview_accepts_captured_state_only() {
+        assert_eq!(
+            parse_editor_preview("captured"),
+            Some(EditorPreview::Captured)
+        );
+        assert_eq!(parse_editor_preview("rolling"), None);
+        assert_eq!(parse_editor_preview("CAPTURED"), None);
+    }
+
+    #[test]
     fn waveform_geometry_is_closed_and_finite() {
         let bins = [
             VisualizationBin {
@@ -567,7 +524,7 @@ mod tests {
             VisualizationBin::default(),
         ];
         let (left, right) = waveform_paths(&bins);
-        assert!(left.starts_with("M 0.00 6.00"));
+        assert!(left.starts_with("M 0.00 2.00"));
         assert!(left.ends_with(" Z"));
         assert!(right.ends_with(" Z"));
         assert!(!left.contains("NaN"));

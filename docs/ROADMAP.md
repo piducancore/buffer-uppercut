@@ -12,9 +12,9 @@ This file tracks current product status. Architectural rationale belongs in
 - Product identity is **Buffer Uppercut**, not a preview or comparison build.
 - CLAP, VST3, and standalone targets build.
 - The framework-neutral `f64` DSP implements every current pad category.
-- MIDI, host tempo, automation, state recall, semantic macro values, factory
-  kits, native `.bupreset` files, and the stereo performance waveform are
-  implemented.
+- MIDI, host tempo, automation, host-native preset recall, semantic macro
+  values, factory kits, the versioned `.bupreset` codec, and the stereo
+  performance waveform are implemented.
 - Processing is allocation-free after activation according to `rt-paranoid`.
 - Three deterministic size baselines exist for the Slint editor.
 - A manual macOS REAPER smoke test passed for the canonical build.
@@ -25,8 +25,8 @@ This file tracks current product status. Architectural rationale belongs in
 
 - Complete the full REAPER checklist for the final **Buffer Uppercut** identity.
 - Run pluginval GUI tests in an interactive desktop session.
-- Add deterministic screenshot states for MIDI-held, captured, reverse, and
-  disabled-macro views.
+- Add deterministic screenshot states for MIDI-held, reverse, and
+  disabled-macro views. Captured performance has a committed baseline.
 - Record controlled benchmark baselines with visualization publishing enabled.
 - Confirm Linux, Windows, and macOS CI for CLAP, VST3, standalone, validators,
   and `rt-paranoid`.

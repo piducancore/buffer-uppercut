@@ -20,18 +20,18 @@ component BrutalSwitch inherits Rectangle {
     in property <string> label: "";
     callback toggled(bool);
 
-    height: 42px;
-    width: 176px;
+    height: 28px;
+    width: 160px;
     background: #0a0a0a;
-    border-width: 2px;
+    border-width: 1px;
     border-color: root.checked ? #eaff00 : #676767;
 
     HorizontalLayout {
-        padding: 7px;
-        spacing: 9px;
+        padding: 4px;
+        spacing: 7px;
 
         Rectangle {
-            width: 38px;
+            width: 32px;
             background: root.checked ? #eaff00 : #202020;
             border-width: 1px;
             border-color: root.checked ? #eaff00 : #676767;
@@ -39,7 +39,7 @@ component BrutalSwitch inherits Rectangle {
             Text {
                 text: root.checked ? "ON" : "OFF";
                 color: root.checked ? #080808 : #b7b4a9;
-                font-size: 10px;
+                font-size: 9px;
                 font-weight: 800;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -49,7 +49,7 @@ component BrutalSwitch inherits Rectangle {
         Text {
             text: root.label;
             color: root.checked ? #f2efe4 : #858278;
-            font-size: 11px;
+            font-size: 9px;
             font-weight: 700;
             vertical-alignment: center;
         }
@@ -369,39 +369,51 @@ component WaveformPanel inherits Rectangle {
     in property <string> left-path;
     in property <string> right-path;
     in property <float> playhead;
+    in property <bool> captured;
     in property <string> mode;
     in property <string> status;
 
-    background: #0a0a0a;
-    border-width: 2px;
-    border-color: #f2efe4;
+    background: root.captured ? #101307 : #0a0a0a;
+    border-width: root.captured ? 3px : 2px;
+    border-color: root.captured ? #eaff00 : #f2efe4;
 
     VerticalLayout {
-        padding: 12px;
-        spacing: 5px;
+        padding: root.captured ? 11px : 12px;
+        spacing: root.captured ? 7px : 5px;
 
         HorizontalLayout {
-            height: 20px;
+            height: root.captured ? 27px : 20px;
+            spacing: 8px;
 
             Text {
-                text: "STEREO BUFFER MONITOR";
-                color: #f2efe4;
-                font-size: 11px;
+                text: root.captured ? "CAPTURED PERFORMANCE CELL" : "STEREO BUFFER MONITOR";
+                color: root.captured ? #eaff00 : #f2efe4;
+                font-size: root.captured ? 13px : 11px;
                 font-weight: 900;
+                vertical-alignment: center;
             }
-            Text {
-                text: root.mode;
-                color: #eaff00;
-                font-size: 10px;
-                font-weight: 800;
-                horizontal-alignment: right;
+
+            Rectangle {
+                width: root.captured ? 138px : 160px;
+                background: root.captured ? #eaff00 : transparent;
+                border-width: root.captured ? 0px : 1px;
+                border-color: #353531;
+
+                Text {
+                    text: root.mode;
+                    color: root.captured ? #080808 : #eaff00;
+                    font-size: 10px;
+                    font-weight: 900;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
         }
 
         Rectangle {
             background: #050505;
             border-width: 1px;
-            border-color: #353531;
+            border-color: root.captured ? #687300 : #353531;
             vertical-stretch: 1;
 
             for line in 4: Rectangle {
@@ -409,7 +421,7 @@ component WaveformPanel inherits Rectangle {
                 y: (line + 1) * parent.height / 5;
                 width: parent.width;
                 height: 1px;
-                background: #292925;
+                background: root.captured ? #30351e : #292925;
             }
 
             Rectangle {
@@ -419,9 +431,17 @@ component WaveformPanel inherits Rectangle {
                 background: #77746b;
             }
 
+            if root.captured: Rectangle {
+                x: clamp(root.playhead * parent.width - 6px, 0px, parent.width - self.width);
+                width: 12px;
+                height: parent.height;
+                background: #eaff00;
+                opacity: 0.13;
+            }
+
             Rectangle {
                 x: root.playhead * (parent.width - 2px);
-                width: 2px;
+                width: root.captured ? 4px : 2px;
                 height: parent.height;
                 background: #eaff00;
             }
@@ -434,12 +454,12 @@ component WaveformPanel inherits Rectangle {
                 viewbox-x: 0;
                 viewbox-y: 0;
                 viewbox-width: 1000;
-                viewbox-height: 100;
+                viewbox-height: 32;
                 commands: root.left-path;
                 fill: #eaff00;
                 stroke: #eaff00;
                 stroke-width: 0.8px;
-                opacity: 0.82;
+                opacity: root.captured ? 0.94 : 0.72;
             }
 
             Path {
@@ -450,12 +470,12 @@ component WaveformPanel inherits Rectangle {
                 viewbox-x: 0;
                 viewbox-y: 0;
                 viewbox-width: 1000;
-                viewbox-height: 100;
+                viewbox-height: 32;
                 commands: root.right-path;
                 fill: #f2efe4;
                 stroke: #f2efe4;
                 stroke-width: 0.8px;
-                opacity: 0.72;
+                opacity: root.captured ? 0.84 : 0.62;
             }
 
             Text {
@@ -477,11 +497,11 @@ component WaveformPanel inherits Rectangle {
         }
 
         Text {
-            height: 16px;
+            height: root.captured ? 18px : 16px;
             text: root.status;
-            color: #99968c;
-            font-size: 9px;
-            font-weight: 700;
+            color: root.captured ? #f2efe4 : #858278;
+            font-size: root.captured ? 10px : 9px;
+            font-weight: root.captured ? 900 : 700;
             overflow: elide;
         }
     }
@@ -509,14 +529,13 @@ export component BufferUppercutUi inherits Window {
     in property <string> waveform-left: "";
     in property <string> waveform-right: "";
     in property <float> waveform-playhead: 1.0;
+    in property <bool> waveform-captured: false;
     in property <string> waveform-mode: "ROLLING / 4 BEATS";
     in property <string> waveform-status: "STEREO HISTORY";
     in property <string> kit-display: "Classic";
 
     callback previous-kit();
     callback next-kit();
-    callback load-kit();
-    callback save-kit();
     callback pitch-edit-began();
     callback pitch-value-changed(float);
     callback pitch-edit-ended();
@@ -583,16 +602,6 @@ export component BufferUppercutUi inherits Window {
                             label: ">";
                             clicked => { root.next-kit(); }
                         }
-                        BrutalButton {
-                            width: 46px;
-                            label: "LOAD";
-                            clicked => { root.load-kit(); }
-                        }
-                        BrutalButton {
-                            width: 46px;
-                            label: "SAVE";
-                            clicked => { root.save-kit(); }
-                        }
                     }
                 }
 
@@ -621,12 +630,28 @@ export component BufferUppercutUi inherits Window {
                     }
                 }
 
-                BrutalSwitch {
-                    checked: root.auto-select;
-                    label: "AUTO-SELECT MIDI";
-                    toggled(value) => {
-                        root.auto-select = value;
-                        root.auto-select-toggled(value);
+                Rectangle {
+                    width: 170px;
+                    background: #111111;
+                    border-width: 1px;
+                    border-color: #353531;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 2px;
+
+                        Text {
+                            text: "PRESETS";
+                            color: #858278;
+                            font-size: 9px;
+                            font-weight: 800;
+                        }
+                        Text {
+                            text: "HOST MENU";
+                            color: #eaff00;
+                            font-size: 14px;
+                            font-weight: 900;
+                        }
                     }
                 }
 
@@ -646,11 +671,12 @@ export component BufferUppercutUi inherits Window {
         }
 
         WaveformPanel {
-            min-height: 135px;
+            min-height: 128px;
             vertical-stretch: 2;
             left-path: root.waveform-left;
             right-path: root.waveform-right;
             playhead: root.waveform-playhead;
+            captured: root.waveform-captured;
             mode: root.waveform-mode;
             status: root.waveform-status;
         }
@@ -671,19 +697,24 @@ export component BufferUppercutUi inherits Window {
                     spacing: 8px;
 
                     HorizontalLayout {
-                        height: 20px;
+                        height: 28px;
+                        spacing: 8px;
+
                         Text {
                             text: "PERFORMANCE PADS";
                             color: #f2efe4;
                             font-size: 11px;
                             font-weight: 900;
+                            vertical-alignment: center;
                         }
-                        Text {
-                            text: "MIDI 60—75 / MOMENTARY";
-                            color: #77746b;
-                            font-size: 9px;
-                            font-weight: 700;
-                            horizontal-alignment: right;
+
+                        BrutalSwitch {
+                            checked: root.auto-select;
+                            label: "AUTO-SELECT MIDI";
+                            toggled(value) => {
+                                root.auto-select = value;
+                                root.auto-select-toggled(value);
+                            }
                         }
                     }
 

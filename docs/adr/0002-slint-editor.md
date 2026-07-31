@@ -17,7 +17,9 @@ in `ui/main.slint` and host/automation/file bindings in `src/editor.rs`.
 
 Continuous controls emit explicit begin/set/end gestures. Unused keyboard
 events pass through to the host. The editor remains resizable with deterministic
-size baselines.
+size baselines. Complete plugin presets use the host-native preset UI provided
+through the TRUCE wrappers. The embedded editor does not launch duplicate
+platform preset dialogs.
 
 ## Consequences
 

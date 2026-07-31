@@ -131,6 +131,12 @@ pads, and clears captured audio.
 - Auto-select MIDI is editor-session state, defaults on, and selects a pad on
   MIDI press.
 - Pointer press selects and activates a pad; release ends the trigger.
+- Pads are the primary interaction surface. Rolling waveform history is
+  secondary; a held buffer effect emphasizes its captured slice without
+  changing the editor layout until the effect is released.
+- Complete plugin presets are loaded and saved through the host-native preset
+  UI exposed by TRUCE wrappers. The editor does not duplicate the DAW's preset
+  browser with LOAD/SAVE buttons.
 - Continuous controls emit begin/set/end automation gestures.
 - Unused macros are disabled.
 - Unhandled keyboard events pass back to the host so REAPER's virtual MIDI

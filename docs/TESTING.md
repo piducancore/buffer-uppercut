@@ -41,10 +41,14 @@ Check all committed sizes:
 cargo truce screenshot --out screenshots/slint-default.png --check --debug --scale 1
 BUFFER_UPPERCUT_EDITOR_SIZE=920x620 cargo truce screenshot --out screenshots/slint-minimum.png --check --debug --scale 1
 BUFFER_UPPERCUT_EDITOR_SIZE=1440x760 cargo truce screenshot --out screenshots/slint-wide.png --check --debug --scale 1
+BUFFER_UPPERCUT_EDITOR_PREVIEW=captured cargo truce screenshot --out screenshots/slint-captured.png --check --debug --scale 1
 ```
 
-The current baselines exercise layout defaults. Additional state baselines for
-MIDI-held, captured, reverse, and disabled-macro states remain roadmap work.
+The default, minimum, and wide baselines exercise rolling history. The captured
+baseline exercises fixed layout geometry, capture emphasis, and held-pad
+hierarchy.
+Additional state baselines for MIDI-held, reverse, and disabled-macro states
+remain roadmap work.
 
 ## Validators
 
@@ -104,10 +108,15 @@ Quit and reopen REAPER after installing a new build.
 - Browse Classic, Glitch Grid, Tape Lab, and Filter & Pitch.
 - Confirm each change selects pad 1, releases triggers, and clears captured
   audio.
-- Save a `.bupreset`, alter the current kit, load the saved file, and verify all
-  16 effect assignments and seven macros per pad.
-- Verify malformed, wrong-version, oversized, and trailing-data files are
-  rejected without changing the active kit.
+
+### Presets
+
+- Use REAPER's preset controls above the embedded editor to save the current
+  complete plugin state.
+- Change kits and controls, load the saved host preset, and verify all 145
+  parameters and the displayed kit name are restored.
+- Confirm the embedded editor contains no duplicate LOAD/SAVE buttons and opens
+  no platform file dialogs.
 
 ## Benchmark
 

@@ -88,6 +88,7 @@ Refresh baselines only after reviewing the rendered result:
 cargo truce screenshot --out screenshots/slint-default.png --debug --scale 1
 BUFFER_UPPERCUT_EDITOR_SIZE=920x620 cargo truce screenshot --out screenshots/slint-minimum.png --debug --scale 1
 BUFFER_UPPERCUT_EDITOR_SIZE=1440x760 cargo truce screenshot --out screenshots/slint-wide.png --debug --scale 1
+BUFFER_UPPERCUT_EDITOR_PREVIEW=captured cargo truce screenshot --out screenshots/slint-captured.png --debug --scale 1
 ```
 
 Custom Slint editor changes require rebuilding and closing/reopening the plugin

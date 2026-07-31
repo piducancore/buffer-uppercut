@@ -39,7 +39,7 @@ dependencies.
 | `src/lib.rs` | plugin lifecycle, processing, host transport/events, parameter-to-DSP translation | visual layout, file dialogs |
 | `src/params.rs` | parameter schema, persisted kit name, atomic MIDI/waveform publication | effect processing |
 | `src/midi.rs` | note mapping and per-channel held masks | parameters, DSP |
-| `src/editor.rs` | host automation gestures, kit file I/O, waveform path construction | audio processing |
+| `src/editor.rs` | host automation gestures, factory-kit application, waveform path construction | audio processing, file dialogs |
 | `ui/` | Slint components, visual hierarchy, responsive layout | plugin or DSP logic |
 | `vendor/` | documented narrow framework backports | product features |
 
@@ -75,10 +75,10 @@ The DSP never mutates the parameter store. Pitch actions emit a host
 
 ## Kit flow
 
-Factory navigation and file loading run on the UI thread:
+Factory navigation and kit application run on the UI thread:
 
 ```text
-factory selection or .bupreset file
+factory selection
         -> validated Kit
         -> normalized host automation writes
         -> persisted kit name
@@ -86,8 +86,10 @@ factory selection or .bupreset file
         -> audio-thread transient clear at next block
 ```
 
-File access never occurs on the audio thread. Kit application releases triggers
-and clears captured audio without resizing DSP buffers.
+Kit application releases triggers and clears captured audio without resizing
+DSP buffers. Complete plugin preset loading and saving belongs to the
+host-native preset UI supplied by the TRUCE wrappers; no platform file dialog
+is launched from the embedded editor.
 
 ## Visualization flow
 
@@ -98,6 +100,10 @@ the previous frame. Slint creates dynamic path geometry on the UI thread.
 
 Rolling mode displays the newest four beats. A held buffer effect displays its
 captured slice, playhead, direction, playback rate, active effect, and duration.
+The editor treats rolling history as secondary performance context. While a
+captured slice is active, the waveform receives stronger capture/playhead
+emphasis without changing the layout geometry; the pads remain the primary
+input surface.
 
 ## Concurrency model
 

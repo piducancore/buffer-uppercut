@@ -12,7 +12,8 @@ It provides:
   and LoFi effects;
 - seven effect-aware macros per pad with semantic labels and values;
 - a stereo history/captured-slice waveform;
-- four factory kits and native `.bupreset` import/export;
+- four factory kits, host-native preset recall, and a versioned `.bupreset`
+  codec;
 - host tempo, automation, state recall, MIDI illumination, and MIDI
   auto-selection;
 - CLAP, VST3, and standalone targets;
@@ -70,6 +71,7 @@ cargo truce screenshot --out /tmp/buffer-uppercut.png --debug --scale 1
 cargo truce screenshot --out screenshots/slint-default.png --check --debug --scale 1
 BUFFER_UPPERCUT_EDITOR_SIZE=920x620 cargo truce screenshot --out screenshots/slint-minimum.png --check --debug --scale 1
 BUFFER_UPPERCUT_EDITOR_SIZE=1440x760 cargo truce screenshot --out screenshots/slint-wide.png --check --debug --scale 1
+BUFFER_UPPERCUT_EDITOR_PREVIEW=captured cargo truce screenshot --out screenshots/slint-captured.png --check --debug --scale 1
 ```
 
 ## Documentation
