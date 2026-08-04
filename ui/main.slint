@@ -4,6 +4,7 @@ export struct PadView {
     number: string,
     note: string,
     effect: string,
+    effect-index: int,
     held: bool,
     selected: bool,
 }
@@ -530,6 +531,7 @@ export component BufferUppercutUi inherits Window {
     in property <string> waveform-right: "";
     in property <float> waveform-playhead: 1.0;
     in property <bool> waveform-captured: false;
+    in property <int> waveform-effect-index: 0;
     in property <string> waveform-mode: "ROLLING / 4 BEATS";
     in property <string> waveform-status: "STEREO HISTORY";
     in property <string> kit-display: "Classic";

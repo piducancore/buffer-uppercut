@@ -26,12 +26,21 @@ const WAVEFORM_AMPLITUDE: f32 = 14.0;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EditorPreview {
     Captured,
+    Pitch,
 }
 
 impl EditorPreview {
-    const fn held_pad(self) -> usize {
+    const fn selected_pad(self) -> usize {
         match self {
             Self::Captured => 1,
+            Self::Pitch => 9,
+        }
+    }
+
+    const fn held_pad(self) -> Option<usize> {
+        match self {
+            Self::Captured => Some(1),
+            Self::Pitch => None,
         }
     }
 }
@@ -40,7 +49,9 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
     let editor = SlintEditor::new(params, configured_editor_size(), move |state| {
         let ui = BufferUppercutUi::new().expect("create Buffer Uppercut Slint editor");
         let editor_preview = configured_editor_preview();
-        let selected_pad = Rc::new(Cell::new(editor_preview.map_or(0, EditorPreview::held_pad)));
+        let selected_pad = Rc::new(Cell::new(
+            editor_preview.map_or(0, EditorPreview::selected_pad),
+        ));
         let auto_select_midi = Rc::new(Cell::new(true));
         let factory_kit_index = Rc::new(Cell::new(Some(0_usize)));
         let last_midi_press_sequence = Rc::new(Cell::new(state.params().midi_pad_press_event().0));
@@ -212,9 +223,10 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                         number: SharedString::from(format!("{:02}", pad + 1)),
                         note: SharedString::from(format!("{}", pad + 60)),
                         effect: SharedString::from(effect_abbreviation(effect)),
+                        effect_index: effect as i32,
                         held: trigger_held
                             || midi_held_bits & (1_u16 << pad) != 0
-                            || editor_preview.is_some_and(|preview| preview.held_pad() == pad),
+                            || editor_preview.and_then(EditorPreview::held_pad) == Some(pad),
                         selected: pad == selected,
                     },
                 );
@@ -249,6 +261,7 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                 ui.set_waveform_right(SharedString::from(right));
                 ui.set_waveform_playhead(waveform.meta.normalized_playhead.clamp(0.0, 1.0));
                 ui.set_waveform_captured(waveform.meta.mode == VisualizationMode::Capture);
+                ui.set_waveform_effect_index(waveform.meta.active_effect as i32);
                 ui.set_waveform_mode(SharedString::from(match waveform.meta.mode {
                     VisualizationMode::Rolling => "ROLLING / 4 BEATS",
                     VisualizationMode::Capture => "CAPTURED CELL",
@@ -306,15 +319,19 @@ fn configured_editor_preview() -> Option<EditorPreview> {
 fn parse_editor_preview(value: &str) -> Option<EditorPreview> {
     match value {
         "captured" => Some(EditorPreview::Captured),
+        "pitch" => Some(EditorPreview::Pitch),
         _ => None,
     }
 }
 
 fn apply_editor_preview(ui: &BufferUppercutUi, preview: Option<EditorPreview>) {
-    let Some(EditorPreview::Captured) = preview else {
-        return;
-    };
+    match preview {
+        Some(EditorPreview::Captured) => apply_captured_editor_preview(ui),
+        Some(EditorPreview::Pitch) | None => {}
+    }
+}
 
+fn apply_captured_editor_preview(ui: &BufferUppercutUi) {
     let mut bins = [VisualizationBin::default(); crate::params::NUM_VISUALIZATION_BINS];
     let bin_count = bins.len() as f32;
     for (index, bin) in bins.iter_mut().enumerate() {
@@ -335,6 +352,7 @@ fn apply_editor_preview(ui: &BufferUppercutUi, preview: Option<EditorPreview>) {
     ui.set_waveform_right(SharedString::from(right));
     ui.set_waveform_playhead(0.64);
     ui.set_waveform_captured(true);
+    ui.set_waveform_effect_index(EffectType::BeatRepeat as i32);
     ui.set_waveform_mode(SharedString::from("CAPTURED CELL"));
     ui.set_waveform_status(SharedString::from(
         "PAD 02 / REPEAT  ·  FWD 0.50x  ·  0.50s",
@@ -372,6 +390,7 @@ fn empty_pad_view(pad: usize) -> PadView {
         number: SharedString::from(format!("{:02}", pad + 1)),
         note: SharedString::from(format!("{}", pad + 60)),
         effect: SharedString::default(),
+        effect_index: EffectType::Off as i32,
         held: false,
         selected: pad == 0,
     }
@@ -503,11 +522,12 @@ mod tests {
     }
 
     #[test]
-    fn configured_preview_accepts_captured_state_only() {
+    fn configured_preview_accepts_supported_states_only() {
         assert_eq!(
             parse_editor_preview("captured"),
             Some(EditorPreview::Captured)
         );
+        assert_eq!(parse_editor_preview("pitch"), Some(EditorPreview::Pitch));
         assert_eq!(parse_editor_preview("rolling"), None);
         assert_eq!(parse_editor_preview("CAPTURED"), None);
     }
