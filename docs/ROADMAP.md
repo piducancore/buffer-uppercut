@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-07-30.
+Last updated: 2026-08-15.
 
 This file tracks current product status. Architectural rationale belongs in
 `adr/`; durable behavior belongs in `CONTRACTS.md`.
@@ -18,20 +18,20 @@ This file tracks current product status. Architectural rationale belongs in
 - Processing is allocation-free after activation according to `rt-paranoid`.
 - Three deterministic size baselines exist for the Slint editor.
 - A manual macOS REAPER smoke test passed for the canonical build.
+- Linux, Windows, and macOS CI passes formatting, Clippy, contract tests,
+  `rt-paranoid`, CLAP/VST3/standalone builds, and headless validators.
+- The canonical repository is `piducancore/buffer-uppercut`; the former C++
+  and WRAC repositories are archived.
 - Archived C++/WRAC state, preset, ID, and source compatibility are explicitly
   out of scope.
 
-## Next: canonical-product sign-off
+## Next: release sign-off
 
 - Complete the full REAPER checklist for the final **Buffer Uppercut** identity.
 - Run pluginval GUI tests in an interactive desktop session.
 - Add deterministic screenshot states for MIDI-held, reverse, and
   disabled-macro views. Captured performance has a committed baseline.
 - Record controlled benchmark baselines with visualization publishing enabled.
-- Confirm Linux, Windows, and macOS CI for CLAP, VST3, standalone, validators,
-  and `rt-paranoid`.
-- Decide repository/remote rename from `buffer-uppercut-truce` as an operational
-  GitHub task; it does not affect plugin identity.
 
 ## Candidate product work
 

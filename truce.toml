@@ -1,7 +1,7 @@
 [vendor]
 name = "PiducanCore"
 id = "com.piducancore"
-url = "https://github.com/piducancore/buffer-uppercut-truce"
+url = "https://github.com/piducancore/buffer-uppercut"
 au_manufacturer = "Pidu"
 
 [[plugin]]
