@@ -20,6 +20,7 @@ use truce_core::editor::{Editor, PluginContext, RawWindowHandle, ResizeCorrector
 use truce_gui::EditorScale;
 use truce_params::Params;
 
+use crate::PhysicalKeyboardEvent;
 use crate::blit::BlitPipeline;
 use crate::platform::{self, ParentWindow};
 
@@ -59,6 +60,8 @@ pub type SyncFn<P> = Box<dyn Fn(&PluginContext<P>)>;
 /// on the same window thread, so no thread crossing actually happens
 /// for the Slint values themselves.
 pub type SetupFn<P> = Arc<dyn Fn(PluginContext<P>) -> SyncFn<P> + Send + Sync>;
+
+type PhysicalKeyboardInput = Arc<dyn Fn(PhysicalKeyboardEvent) -> bool + Send + Sync>;
 
 /// Slint-based editor implementing truce's `Editor` trait.
 ///
@@ -129,6 +132,9 @@ pub struct SlintEditor<P: Params + ?Sized> {
     /// host. Defaults to `false`, preserving Slint's normal keyboard capture
     /// for text input and focused controls.
     keyboard_passthrough: bool,
+    /// Optional native physical-key and focus observer. A `true` key result
+    /// consumes that event even when host passthrough is enabled.
+    physical_keyboard_input: Option<PhysicalKeyboardInput>,
     min_size: (u32, u32),
     max_size: (u32, u32),
     aspect_ratio: Option<(u32, u32)>,
@@ -272,6 +278,7 @@ impl<P: Params + 'static> SlintEditor<P> {
             can_resize: false,
             can_maximize: false,
             keyboard_passthrough: false,
+            physical_keyboard_input: None,
             min_size: (1, 1),
             max_size: (u32::MAX, u32::MAX),
             aspect_ratio: None,
@@ -308,6 +315,20 @@ impl<P: Params + 'static> SlintEditor<P> {
     #[must_use]
     pub fn keyboard_passthrough(mut self, passthrough: bool) -> Self {
         self.keyboard_passthrough = passthrough;
+        self
+    }
+
+    /// Observe native physical key codes and editor focus lifecycle.
+    ///
+    /// Returning `true` consumes a key event. Focus and close notifications
+    /// ignore the return value. Logical keyboard events are still dispatched
+    /// to Slint when the native key has a Slint representation.
+    #[must_use]
+    pub fn physical_keyboard_input(
+        mut self,
+        callback: impl Fn(PhysicalKeyboardEvent) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.physical_keyboard_input = Some(Arc::new(callback));
         self
     }
 
@@ -423,6 +444,7 @@ struct SlintWindowHandler<P: Params + ?Sized> {
     resize_corrector: ResizeCorrector,
     /// Return dispatched keyboard events to the parent host when enabled.
     keyboard_passthrough: bool,
+    physical_keyboard_input: Option<PhysicalKeyboardInput>,
 }
 
 /// Wraps the live handler so a wgpu init failure at `open()` time
@@ -838,6 +860,20 @@ impl<P: Params + ?Sized + 'static> WindowHandler for SlintWindowHandler<P> {
                 }
             }
             Event::Window(win) => {
+                if let Some(callback) = &self.physical_keyboard_input {
+                    match &win {
+                        baseview::WindowEvent::Focused => {
+                            callback(PhysicalKeyboardEvent::FocusChanged(true));
+                        }
+                        baseview::WindowEvent::Unfocused => {
+                            callback(PhysicalKeyboardEvent::FocusChanged(false));
+                        }
+                        baseview::WindowEvent::WillClose => {
+                            callback(PhysicalKeyboardEvent::EditorClosed);
+                        }
+                        baseview::WindowEvent::Resized(_) => {}
+                    }
+                }
                 if let baseview::WindowEvent::Resized(info) = win {
                     let phys_w = info.physical_size().width;
                     let phys_h = info.physical_size().height;
@@ -941,12 +977,22 @@ impl<P: Params + ?Sized + 'static> WindowHandler for SlintWindowHandler<P> {
                 EventStatus::Ignored
             }
             Event::Keyboard(kb) => {
+                let consumed = self
+                    .physical_keyboard_input
+                    .as_ref()
+                    .is_some_and(|callback| {
+                        callback(PhysicalKeyboardEvent::Key {
+                            code: kb.code,
+                            pressed: kb.state == keyboard_types::KeyState::Down,
+                            repeat: kb.repeat,
+                        })
+                    });
                 // Keys only arrive when the host grants the editor window OS
                 // focus, which varies by DAW. Slint tracks modifier state
                 // from the modifier keys' own press/release events, so we
                 // forward every key (including Shift/Ctrl/...) verbatim.
                 let Some(text) = slint_key_text(&kb.key) else {
-                    return EventStatus::Ignored;
+                    return dispatched_keyboard_status(self.keyboard_passthrough, consumed);
                 };
                 let window = self.slint_window.window();
                 match kb.state {
@@ -960,7 +1006,7 @@ impl<P: Params + ?Sized + 'static> WindowHandler for SlintWindowHandler<P> {
                         window.dispatch_event(WindowEvent::KeyReleased { text });
                     }
                 }
-                dispatched_keyboard_status(self.keyboard_passthrough)
+                dispatched_keyboard_status(self.keyboard_passthrough, consumed)
             }
         }
     }
@@ -970,8 +1016,8 @@ impl<P: Params + ?Sized + 'static> WindowHandler for SlintWindowHandler<P> {
 ///
 /// Keeping this decision separate from dispatch makes the opt-in behavior
 /// explicit and unit-testable without constructing a native baseview window.
-const fn dispatched_keyboard_status(keyboard_passthrough: bool) -> EventStatus {
-    if keyboard_passthrough {
+const fn dispatched_keyboard_status(keyboard_passthrough: bool, consumed: bool) -> EventStatus {
+    if keyboard_passthrough && !consumed {
         EventStatus::Ignored
     } else {
         EventStatus::Captured
@@ -1088,6 +1134,7 @@ impl<P: Params + 'static> Editor for SlintEditor<P> {
         let setup = Arc::clone(&self.setup);
         let scale_handle = self.scale.clone();
         let keyboard_passthrough = self.keyboard_passthrough;
+        let physical_keyboard_input = self.physical_keyboard_input.clone();
 
         // --- baseview + wgpu ---
         let options = WindowOpenOptions {
@@ -1180,6 +1227,7 @@ impl<P: Params + 'static> Editor for SlintEditor<P> {
                     aspect_ratio,
                     resize_corrector: ResizeCorrector::default(),
                     keyboard_passthrough,
+                    physical_keyboard_input,
                 }))
             })
         }));
@@ -1245,6 +1293,9 @@ impl<P: Params + 'static> Editor for SlintEditor<P> {
     }
 
     fn close(&mut self) {
+        if let Some(callback) = &self.physical_keyboard_input {
+            callback(PhysicalKeyboardEvent::EditorClosed);
+        }
         if let Some(mut window) = self.window.take() {
             window.close();
         }
@@ -1282,6 +1333,9 @@ impl<P: Params + ?Sized> Drop for SlintEditor<P> {
         // `self.window.take()`. (Inlined rather than calling
         // `Editor::close` because that impl requires `P: Sized` while
         // this `Drop` must match the struct's `?Sized`.)
+        if let Some(callback) = &self.physical_keyboard_input {
+            callback(PhysicalKeyboardEvent::EditorClosed);
+        }
         if let Some(mut window) = self.window.take() {
             window.close();
         }
@@ -1295,7 +1349,7 @@ mod tests {
     #[test]
     fn keyboard_events_are_captured_by_default() {
         assert!(matches!(
-            dispatched_keyboard_status(false),
+            dispatched_keyboard_status(false, false),
             EventStatus::Captured
         ));
     }
@@ -1303,8 +1357,16 @@ mod tests {
     #[test]
     fn keyboard_passthrough_returns_dispatched_events_to_host() {
         assert!(matches!(
-            dispatched_keyboard_status(true),
+            dispatched_keyboard_status(true, false),
             EventStatus::Ignored
+        ));
+    }
+
+    #[test]
+    fn consumed_keyboard_events_override_host_passthrough() {
+        assert!(matches!(
+            dispatched_keyboard_status(true, true),
+            EventStatus::Captured
         ));
     }
 }

@@ -10,6 +10,7 @@ resolver = "3"
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
+doctest = false
 
 [[bin]]
 name = "buffer-uppercut-standalone"
@@ -36,6 +37,7 @@ rt-paranoid = ["truce/rt-paranoid"]
 [dependencies]
 buffer-uppercut-dsp = { path = "dsp" }
 buffer-uppercut-kit = { path = "kit" }
+keyboard-types = "0.7"
 truce = { version = "6.3" }
 truce-slint = { version = "6.3" }
 slint = { version = "=1.15.1", default-features = false, features = ["compat-1-2", "renderer-software", "std"] }

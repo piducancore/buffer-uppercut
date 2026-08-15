@@ -6,6 +6,8 @@
 
 pub const NUM_PADS: usize = 16;
 pub const NUM_MACROS: usize = 7;
+pub const MAX_ACTIVE_PROCESSORS: usize = 6;
+const HISTORY_SECONDS: f64 = 8.0;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum VisualizationMode {
@@ -31,6 +33,13 @@ pub struct VisualizationMeta {
     pub reverse: bool,
     pub play_rate: f32,
     pub duration_seconds: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AdmissionMeta {
+    pub held_mask: u16,
+    pub active_mask: u16,
+    pub suspended_mask: u16,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -489,20 +498,9 @@ pub fn classic_state() -> PerformanceState {
     state
 }
 
-#[derive(Clone, Copy)]
-enum Category {
-    Buffer,
-    Gate,
-    BandLow,
-    BandMid,
-    BandHigh,
-    LoFi,
-}
-
-pub struct Engine {
-    sample_rate: f64,
-    buffer_l: Vec<f64>,
-    buffer_r: Vec<f64>,
+struct BufferState {
+    history_l: Vec<f32>,
+    history_r: Vec<f32>,
     write_pos: usize,
     repeat_active: bool,
     repeat_phase: f64,
@@ -519,32 +517,15 @@ pub struct Engine {
     stop_fade: f64,
     stop_amp: f64,
     rng: u32,
-    last_held: [bool; NUM_PADS],
-    press_order: [u64; NUM_PADS],
-    press_counter: u64,
-    active_buffer_slot: Option<usize>,
-    active_buffer_type: EffectType,
-    low_state: [f64; 2],
-    mid_low_state: [f64; 2],
-    mid_high_state: [f64; 2],
-    high_state: [f64; 2],
-    lofi_held: [f64; 2],
-    lofi_counter: i32,
-    gate_phase: f64,
-    gate_gain: f64,
-    active_gate_slot: Option<usize>,
-    active_low_slot: Option<usize>,
-    active_mid_slot: Option<usize>,
-    active_high_slot: Option<usize>,
-    active_lofi_slot: Option<usize>,
+    seed: u32,
 }
 
-impl Default for Engine {
-    fn default() -> Self {
-        let mut engine = Self {
-            sample_rate: 44_100.0,
-            buffer_l: Vec::new(),
-            buffer_r: Vec::new(),
+impl BufferState {
+    fn new(slot: usize) -> Self {
+        let seed = 0x1234_5678 ^ (slot as u32).wrapping_mul(0x9e37_79b9);
+        Self {
+            history_l: Vec::new(),
+            history_r: Vec::new(),
             write_pos: 0,
             repeat_active: false,
             repeat_phase: 0.0,
@@ -560,25 +541,145 @@ impl Default for Engine {
             stop_start_rate: 1.0,
             stop_fade: 1.0,
             stop_amp: 1.0,
-            rng: 0x1234_5678,
-            last_held: [false; NUM_PADS],
-            press_order: [0; NUM_PADS],
-            press_counter: 0,
-            active_buffer_slot: None,
-            active_buffer_type: EffectType::Off,
-            low_state: [0.0; 2],
-            mid_low_state: [0.0; 2],
-            mid_high_state: [0.0; 2],
-            high_state: [0.0; 2],
+            rng: seed,
+            seed,
+        }
+    }
+
+    fn prepare(&mut self, length: usize) {
+        self.history_l.clear();
+        self.history_l.resize(length, 0.0);
+        self.history_r.clear();
+        self.history_r.resize(length, 0.0);
+        self.clear_history();
+    }
+
+    fn clear_history(&mut self) {
+        self.history_l.fill(0.0);
+        self.history_r.fill(0.0);
+        self.write_pos = 0;
+        self.reset_capture();
+    }
+
+    fn reset_capture(&mut self) {
+        self.repeat_active = false;
+        self.repeat_phase = 0.0;
+        self.repeat_count = 0;
+        self.capture_start = self.write_pos;
+        self.lookback_samples = 1;
+        self.slice_samples = 1;
+        self.repeat_reverse = false;
+        self.play_rate = 1.0;
+        self.stop_elapsed = 0;
+        self.stop_total_samples = 1;
+        self.stop_curve = 1.0;
+        self.stop_start_rate = 1.0;
+        self.stop_fade = 1.0;
+        self.stop_amp = 1.0;
+        self.rng = self.seed;
+    }
+
+    fn wrap(&self, position: i64) -> usize {
+        position.rem_euclid(self.history_l.len() as i64) as usize
+    }
+
+    fn record(&mut self, sample: [f64; 2]) {
+        self.history_l[self.write_pos] = sample[0] as f32;
+        self.history_r[self.write_pos] = sample[1] as f32;
+    }
+
+    fn advance(&mut self) {
+        self.write_pos = self.wrap(self.write_pos as i64 + 1);
+    }
+
+    fn rand_01(&mut self) -> f64 {
+        self.rng = self.rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        f64::from((self.rng >> 8) & 0x00ff_ffff) / 16_777_216.0
+    }
+}
+
+struct SlotRuntime {
+    configured_type: EffectType,
+    held: bool,
+    active: bool,
+    suspended: bool,
+    request_order: u64,
+    admission_order: u64,
+    processor_ready: bool,
+    buffer: BufferState,
+    filter_a: [f64; 2],
+    filter_b: [f64; 2],
+    lofi_held: [f64; 2],
+    lofi_counter: i32,
+    gate_phase: f64,
+    gate_gain: f64,
+}
+
+impl SlotRuntime {
+    fn new(slot: usize) -> Self {
+        Self {
+            configured_type: EffectType::Off,
+            held: false,
+            active: false,
+            suspended: false,
+            request_order: 0,
+            admission_order: 0,
+            processor_ready: false,
+            buffer: BufferState::new(slot),
+            filter_a: [0.0; 2],
+            filter_b: [0.0; 2],
             lofi_held: [0.0; 2],
             lofi_counter: 0,
             gate_phase: 0.0,
             gate_gain: 1.0,
-            active_gate_slot: None,
-            active_low_slot: None,
-            active_mid_slot: None,
-            active_high_slot: None,
-            active_lofi_slot: None,
+        }
+    }
+
+    fn reset_processor(&mut self) {
+        self.buffer.reset_capture();
+        self.filter_a = [0.0; 2];
+        self.filter_b = [0.0; 2];
+        self.lofi_held = [0.0; 2];
+        self.lofi_counter = 0;
+        self.gate_phase = 0.0;
+        self.gate_gain = 1.0;
+        self.processor_ready = false;
+    }
+
+    fn clear_runtime(&mut self) {
+        self.configured_type = EffectType::Off;
+        self.held = false;
+        self.active = false;
+        self.suspended = false;
+        self.request_order = 0;
+        self.admission_order = 0;
+        self.reset_processor();
+        self.buffer.clear_history();
+    }
+}
+
+pub struct Engine {
+    sample_rate: f64,
+    slots: [SlotRuntime; NUM_PADS],
+    rolling_l: Vec<f32>,
+    rolling_r: Vec<f32>,
+    rolling_write_pos: usize,
+    request_counter: u64,
+    admission_counter: u64,
+    selected_slot: Option<usize>,
+}
+
+impl Default for Engine {
+    fn default() -> Self {
+        let mut engine = Self {
+            sample_rate: 44_100.0,
+            slots: std::array::from_fn(SlotRuntime::new),
+            rolling_l: Vec::new(),
+            rolling_r: Vec::new(),
+            rolling_write_pos: 0,
+            request_counter: 0,
+            admission_counter: 0,
+            selected_slot: None,
         };
         engine.reset(44_100.0);
         engine
@@ -594,57 +695,34 @@ impl Engine {
     }
 
     pub fn reset(&mut self, sample_rate: f64) {
-        self.sample_rate = sample_rate.max(1.0);
-        let required = (self.sample_rate * 16.0) as usize;
-        let length = required.max(1).next_power_of_two();
-        self.buffer_l.clear();
-        self.buffer_l.resize(length, 0.0);
-        self.buffer_r.clear();
-        self.buffer_r.resize(length, 0.0);
+        self.sample_rate = if sample_rate.is_finite() {
+            sample_rate.max(1.0)
+        } else {
+            44_100.0
+        };
+        let required = (self.sample_rate * HISTORY_SECONDS).ceil() as usize;
+        let length = required.max(16).next_power_of_two();
+        self.rolling_l.clear();
+        self.rolling_l.resize(length, 0.0);
+        self.rolling_r.clear();
+        self.rolling_r.resize(length, 0.0);
+        for slot in &mut self.slots {
+            slot.buffer.prepare(length);
+        }
         self.clear_transient();
     }
 
-    /// Clears captured audio and all held/effect history without resizing.
-    ///
-    /// This is safe to call from the process thread after a kit change: the
-    /// buffers retain their activation-time capacity and no allocation occurs.
+    /// Clears all runtime state and histories without resizing prepared storage.
     pub fn clear_transient(&mut self) {
-        self.buffer_l.fill(0.0);
-        self.buffer_r.fill(0.0);
-        self.write_pos = 0;
-        self.repeat_active = false;
-        self.repeat_phase = 0.0;
-        self.repeat_count = 0;
-        self.capture_start = 0;
-        self.lookback_samples = 1;
-        self.slice_samples = 1;
-        self.repeat_reverse = false;
-        self.play_rate = 1.0;
-        self.stop_elapsed = 0;
-        self.stop_total_samples = 1;
-        self.stop_curve = 1.0;
-        self.stop_start_rate = 1.0;
-        self.stop_fade = 1.0;
-        self.stop_amp = 1.0;
-        self.rng = 0x1234_5678;
-        self.last_held = [false; NUM_PADS];
-        self.press_order = [0; NUM_PADS];
-        self.press_counter = 0;
-        self.active_buffer_slot = None;
-        self.active_buffer_type = EffectType::Off;
-        self.low_state = [0.0; 2];
-        self.mid_low_state = [0.0; 2];
-        self.mid_high_state = [0.0; 2];
-        self.high_state = [0.0; 2];
-        self.lofi_held = [0.0; 2];
-        self.lofi_counter = 0;
-        self.gate_phase = 0.0;
-        self.gate_gain = 1.0;
-        self.active_gate_slot = None;
-        self.active_low_slot = None;
-        self.active_mid_slot = None;
-        self.active_high_slot = None;
-        self.active_lofi_slot = None;
+        self.rolling_l.fill(0.0);
+        self.rolling_r.fill(0.0);
+        self.rolling_write_pos = 0;
+        self.request_counter = 0;
+        self.admission_counter = 0;
+        self.selected_slot = None;
+        for slot in &mut self.slots {
+            slot.clear_runtime();
+        }
     }
 
     pub fn process(
@@ -661,187 +739,385 @@ impl Engine {
             .min(input_r.len())
             .min(output_l.len())
             .min(output_r.len());
-        self.update_press_order(state);
-        let samples_per_beat = self.sample_rate * 60.0 / tempo.max(1.0);
-        let buffer_slot = self.find_newest_held(state, Category::Buffer);
-        let buffer_type = buffer_slot.map_or(EffectType::Off, |slot| state.pads[slot].effect_type);
-        if buffer_slot != self.active_buffer_slot || buffer_type != self.active_buffer_type {
-            self.active_buffer_slot = buffer_slot;
-            self.active_buffer_type = buffer_type;
-            if let Some(slot) = buffer_slot {
-                self.start_buffer_effect(&state.pads[slot], samples_per_beat);
-            } else {
-                self.repeat_active = false;
-            }
-        }
-
-        let low_slot = self.find_newest_held(state, Category::BandLow);
-        let mid_slot = self.find_newest_held(state, Category::BandMid);
-        let high_slot = self.find_newest_held(state, Category::BandHigh);
-        let lofi_slot = self.find_newest_held(state, Category::LoFi);
-        let gate_slot = self.find_newest_held(state, Category::Gate);
-        self.active_low_slot = low_slot;
-        self.active_mid_slot = mid_slot;
-        self.active_high_slot = high_slot;
-        self.active_lofi_slot = lofi_slot;
-        if gate_slot != self.active_gate_slot {
-            self.active_gate_slot = gate_slot;
-            if let Some(slot) = gate_slot {
-                let gate = &state.pads[slot];
-                let period = (grid_beats(gate.macros[0]) * samples_per_beat).max(2.0);
-                self.gate_phase = clamp_macro(gate.macros[5]) * period;
-            }
-        }
+        let tempo = if tempo.is_finite() {
+            tempo.max(1.0)
+        } else {
+            120.0
+        };
+        let samples_per_beat = self.sample_rate * 60.0 / tempo;
+        self.resolve_slots(state, samples_per_beat);
 
         for sample in 0..frames {
-            let dry_l = input_l[sample];
-            let dry_r = input_r[sample];
-            self.buffer_l[self.write_pos] = dry_l;
-            self.buffer_r[self.write_pos] = dry_r;
-            let mut output = [dry_l, dry_r];
-            if self.repeat_active
-                && let Some(slot) = buffer_slot
-            {
-                self.process_buffer_sample(
-                    [dry_l, dry_r],
-                    &mut output,
-                    &state.pads[slot],
-                    state.performance_pitch,
-                );
+            let input = [
+                Self::finite_f64(input_l[sample]),
+                Self::finite_f64(input_r[sample]),
+            ];
+            self.rolling_l[self.rolling_write_pos] = input[0] as f32;
+            self.rolling_r[self.rolling_write_pos] = input[1] as f32;
+            self.rolling_write_pos =
+                Self::wrap_length(self.rolling_write_pos as i64 + 1, self.rolling_l.len());
+
+            let mut signal = input;
+            for slot_index in 0..NUM_PADS {
+                let config = state.pads[slot_index];
+                let slot = &mut self.slots[slot_index];
+                let stage_input = signal;
+                if config.effect_type.is_buffer() {
+                    slot.buffer.record(stage_input);
+                }
+                if slot.active {
+                    signal = Self::process_slot(
+                        slot,
+                        stage_input,
+                        &config,
+                        self.sample_rate,
+                        samples_per_beat,
+                        state.performance_pitch,
+                    );
+                }
+                if config.effect_type.is_buffer() {
+                    slot.buffer.advance();
+                }
             }
-            self.apply_bands(&mut output, state, low_slot, mid_slot, high_slot);
-            self.apply_lofi(&mut output, state, lofi_slot);
-            self.apply_gate(&mut output, state, gate_slot, samples_per_beat);
-            output_l[sample] = output[0];
-            output_r[sample] = output[1];
-            self.write_pos = self.wrap(self.write_pos as i64 + 1);
+            output_l[sample] = Self::finite_f64(signal[0]);
+            output_r[sample] = Self::finite_f64(signal[1]);
+        }
+    }
+
+    fn resolve_slots(&mut self, state: &PerformanceState, samples_per_beat: f64) {
+        let mut new_continuous_request = [false; NUM_PADS];
+
+        for (slot_index, request) in new_continuous_request.iter_mut().enumerate() {
+            let old_type = self.slots[slot_index].configured_type;
+            let new_type = state.pads[slot_index].effect_type;
+            if old_type == new_type {
+                continue;
+            }
+
+            let old_continuous = Self::is_continuous(old_type);
+            let new_continuous = Self::is_continuous(new_type);
+            if !old_type.is_buffer() && new_type.is_buffer() {
+                self.slots[slot_index].buffer.clear_history();
+            } else {
+                self.slots[slot_index].buffer.reset_capture();
+            }
+            self.slots[slot_index].filter_a = [0.0; 2];
+            self.slots[slot_index].filter_b = [0.0; 2];
+            self.slots[slot_index].lofi_held = [0.0; 2];
+            self.slots[slot_index].lofi_counter = 0;
+            self.slots[slot_index].gate_phase = 0.0;
+            self.slots[slot_index].gate_gain = 1.0;
+            self.slots[slot_index].processor_ready = false;
+            self.slots[slot_index].configured_type = new_type;
+
+            if old_continuous && !new_continuous {
+                self.remove_from_admission(slot_index);
+            } else if !old_continuous && new_continuous && state.held[slot_index] {
+                *request = true;
+            } else if old_continuous && new_continuous && self.slots[slot_index].active {
+                self.start_processor(slot_index, &state.pads[slot_index], samples_per_beat);
+            }
+        }
+
+        for slot_index in 0..NUM_PADS {
+            if self.slots[slot_index].held && !state.held[slot_index] {
+                self.remove_from_admission(slot_index);
+                self.slots[slot_index].reset_processor();
+            }
+        }
+
+        self.restore_suspended(state, samples_per_beat);
+
+        for (slot_index, new_request) in new_continuous_request.into_iter().enumerate() {
+            let rising = state.held[slot_index] && !self.slots[slot_index].held;
+            if (rising || new_request) && Self::is_continuous(state.pads[slot_index].effect_type) {
+                self.admit_new_request(slot_index, &state.pads[slot_index], samples_per_beat);
+            }
+            self.slots[slot_index].held = state.held[slot_index];
+        }
+    }
+
+    fn admit_new_request(&mut self, slot_index: usize, config: &PadConfig, samples_per_beat: f64) {
+        self.remove_from_admission(slot_index);
+        self.slots[slot_index].reset_processor();
+        self.request_counter = self.request_counter.wrapping_add(1);
+        self.slots[slot_index].request_order = self.request_counter;
+        if self.active_count() >= MAX_ACTIVE_PROCESSORS
+            && let Some(oldest) = self.oldest_active_slot()
+        {
+            self.slots[oldest].active = false;
+            self.slots[oldest].suspended = true;
+            self.slots[oldest].admission_order = 0;
+        }
+        self.activate_slot(slot_index, config, samples_per_beat);
+    }
+
+    fn restore_suspended(&mut self, state: &PerformanceState, samples_per_beat: f64) {
+        while self.active_count() < MAX_ACTIVE_PROCESSORS {
+            let mut candidate = None;
+            let mut newest_request = 0;
+            for slot_index in 0..NUM_PADS {
+                let slot = &self.slots[slot_index];
+                if slot.suspended && state.held[slot_index] && slot.request_order >= newest_request
+                {
+                    candidate = Some(slot_index);
+                    newest_request = slot.request_order;
+                }
+            }
+            let Some(slot_index) = candidate else {
+                break;
+            };
+            self.activate_slot(slot_index, &state.pads[slot_index], samples_per_beat);
+        }
+    }
+
+    fn activate_slot(&mut self, slot_index: usize, config: &PadConfig, samples_per_beat: f64) {
+        self.admission_counter = self.admission_counter.wrapping_add(1);
+        let slot = &mut self.slots[slot_index];
+        slot.active = true;
+        slot.suspended = false;
+        slot.admission_order = self.admission_counter;
+        if !slot.processor_ready {
+            self.start_processor(slot_index, config, samples_per_beat);
+        }
+    }
+
+    fn start_processor(&mut self, slot_index: usize, config: &PadConfig, samples_per_beat: f64) {
+        let slot = &mut self.slots[slot_index];
+        match config.effect_type {
+            EffectType::BeatRepeat | EffectType::Reverse | EffectType::TapeStop => {
+                Self::start_buffer_effect(&mut slot.buffer, config, samples_per_beat);
+            }
+            EffectType::Gate => {
+                let period = (grid_beats(config.macros[0]) * samples_per_beat).max(2.0);
+                slot.gate_phase = clamp_macro(config.macros[5]) * period;
+            }
+            _ => {}
+        }
+        slot.processor_ready = true;
+    }
+
+    fn remove_from_admission(&mut self, slot_index: usize) {
+        let slot = &mut self.slots[slot_index];
+        slot.active = false;
+        slot.suspended = false;
+        slot.request_order = 0;
+        slot.admission_order = 0;
+    }
+
+    fn active_count(&self) -> usize {
+        self.slots.iter().filter(|slot| slot.active).count()
+    }
+
+    fn oldest_active_slot(&self) -> Option<usize> {
+        let mut oldest = None;
+        let mut oldest_order = u64::MAX;
+        for (slot_index, slot) in self.slots.iter().enumerate() {
+            if slot.active && slot.admission_order < oldest_order {
+                oldest = Some(slot_index);
+                oldest_order = slot.admission_order;
+            }
+        }
+        oldest
+    }
+
+    const fn is_continuous(effect: EffectType) -> bool {
+        !matches!(
+            effect,
+            EffectType::Off | EffectType::PitchDown | EffectType::PitchReset | EffectType::PitchUp
+        )
+    }
+
+    fn process_slot(
+        slot: &mut SlotRuntime,
+        stage_input: [f64; 2],
+        config: &PadConfig,
+        sample_rate: f64,
+        samples_per_beat: f64,
+        performance_pitch: f64,
+    ) -> [f64; 2] {
+        match config.effect_type {
+            EffectType::BeatRepeat | EffectType::Reverse | EffectType::TapeStop => {
+                Self::process_buffer_sample(
+                    &mut slot.buffer,
+                    stage_input,
+                    config,
+                    performance_pitch,
+                )
+            }
+            EffectType::Gate => {
+                Self::apply_gate(slot, stage_input, config, sample_rate, samples_per_beat)
+            }
+            EffectType::BandLow | EffectType::BandMid | EffectType::BandHigh => {
+                Self::apply_band(slot, stage_input, config, sample_rate)
+            }
+            EffectType::LoFi => Self::apply_lofi(slot, stage_input, config, sample_rate),
+            _ => stage_input,
         }
     }
 
     #[must_use]
-    pub const fn active_buffer_slot(&self) -> Option<usize> {
-        self.active_buffer_slot
+    pub fn active_buffer_slot(&self) -> Option<usize> {
+        self.slots.iter().position(|slot| {
+            slot.active && slot.configured_type.is_buffer() && slot.buffer.repeat_active
+        })
     }
 
     #[must_use]
-    pub const fn repeat_active(&self) -> bool {
-        self.repeat_active
+    pub fn repeat_active(&self) -> bool {
+        self.visualization_buffer_slot()
+            .is_some_and(|slot| self.slots[slot].buffer.repeat_active)
     }
 
     #[must_use]
-    pub const fn gate_gain(&self) -> f64 {
-        self.gate_gain
+    pub fn gate_gain(&self) -> f64 {
+        self.slots
+            .iter()
+            .find(|slot| slot.active && slot.configured_type == EffectType::Gate)
+            .map_or(1.0, |slot| slot.gate_gain)
     }
 
     #[must_use]
-    pub const fn slice_samples(&self) -> i32 {
-        self.slice_samples
+    pub fn slice_samples(&self) -> i32 {
+        self.visualization_buffer_slot()
+            .map_or(1, |slot| self.slots[slot].buffer.slice_samples)
     }
 
     #[must_use]
-    pub const fn lookback_samples(&self) -> i32 {
-        self.lookback_samples
+    pub fn lookback_samples(&self) -> i32 {
+        self.visualization_buffer_slot()
+            .map_or(1, |slot| self.slots[slot].buffer.lookback_samples)
     }
 
     #[must_use]
-    pub const fn play_rate(&self) -> f64 {
-        self.play_rate
+    pub fn play_rate(&self) -> f64 {
+        self.visualization_buffer_slot()
+            .map_or(1.0, |slot| self.slots[slot].buffer.play_rate)
     }
 
     #[must_use]
-    pub const fn history_bytes(&self) -> usize {
-        self.buffer_l.len() * 2 * std::mem::size_of::<f64>()
+    pub fn history_bytes(&self) -> usize {
+        let rolling = (self.rolling_l.len() + self.rolling_r.len()) * std::mem::size_of::<f32>();
+        rolling
+            + self
+                .slots
+                .iter()
+                .map(|slot| {
+                    (slot.buffer.history_l.len() + slot.buffer.history_r.len())
+                        * std::mem::size_of::<f32>()
+                })
+                .sum::<usize>()
     }
 
-    /// Downsample the engine's current stereo history into caller-owned bins.
-    ///
-    /// When no buffer effect is active, the view contains the newest four
-    /// beats (limited by the available circular history). During a buffer
-    /// effect it contains the exact captured slice, independent of playback
-    /// direction. The returned playhead follows the actual read direction.
-    ///
-    /// This method is a read-only projection of prepared DSP storage: it does
-    /// not allocate, synchronize, or change processing state.
+    #[must_use]
+    pub fn admission_meta(&self) -> AdmissionMeta {
+        let mut meta = AdmissionMeta::default();
+        for (slot_index, slot) in self.slots.iter().enumerate() {
+            let bit = 1_u16 << slot_index;
+            if slot.held {
+                meta.held_mask |= bit;
+            }
+            if slot.active {
+                meta.active_mask |= bit;
+            }
+            if slot.suspended {
+                meta.suspended_mask |= bit;
+            }
+        }
+        meta
+    }
+
+    pub fn set_visualization_selected_slot(&mut self, selected_slot: Option<usize>) {
+        self.selected_slot = selected_slot.filter(|slot| *slot < NUM_PADS);
+    }
+
+    fn visualization_buffer_slot(&self) -> Option<usize> {
+        if let Some(slot_index) = self.selected_slot {
+            let slot = &self.slots[slot_index];
+            if slot.held && slot.configured_type.is_buffer() && slot.buffer.repeat_active {
+                return Some(slot_index);
+            }
+        }
+        self.active_buffer_slot()
+    }
+
+    /// Downsample prepared stereo history into caller-owned bins without allocation.
     #[must_use]
     pub fn fill_visualization(
         &self,
         tempo: f64,
         bins: &mut [VisualizationBin],
     ) -> VisualizationMeta {
-        let history_len = self.buffer_l.len().min(self.buffer_r.len());
-        let active = self.repeat_active && self.active_buffer_slot.is_some();
-
-        let (mode, start, sample_count) = if active {
-            let sample_count = (self.slice_samples.max(1) as usize).min(history_len);
-            (VisualizationMode::Capture, self.capture_start, sample_count)
-        } else {
-            let tempo = if tempo.is_finite() {
-                tempo.max(1.0)
-            } else {
-                120.0
-            };
-            let requested = (4.0 * self.sample_rate.max(1.0) * 60.0 / tempo).round() as usize;
-            let sample_count = requested.max(1).min(history_len);
-            (
-                VisualizationMode::Rolling,
-                self.wrap(self.write_pos as i64 - sample_count as i64),
+        if let Some(slot_index) = self.visualization_buffer_slot() {
+            let slot = &self.slots[slot_index];
+            let buffer = &slot.buffer;
+            let history_len = buffer.history_l.len().min(buffer.history_r.len());
+            let sample_count = (buffer.slice_samples.max(1) as usize).min(history_len);
+            Self::fill_visualization_bins(
+                &buffer.history_l,
+                &buffer.history_r,
+                buffer.capture_start,
                 sample_count,
-            )
-        };
-
-        self.fill_visualization_bins(start, sample_count, bins);
-
-        let duration_seconds = Self::finite_f32(sample_count as f64 / self.sample_rate.max(1.0));
-        if active {
+                bins,
+            );
             let max_phase = (sample_count.saturating_sub(1)) as f64;
-            let phase = if self.repeat_phase.is_finite() {
-                self.repeat_phase.clamp(0.0, max_phase)
-            } else {
-                0.0
-            };
-            let read_phase = if self.repeat_reverse {
+            let phase = Self::finite_f64(buffer.repeat_phase).clamp(0.0, max_phase);
+            let read_phase = if buffer.repeat_reverse {
                 max_phase - phase
             } else {
                 phase
             };
-            let normalized_playhead = if max_phase > 0.0 {
-                Self::finite_f32((read_phase / max_phase).clamp(0.0, 1.0))
-            } else {
-                0.0
+            return VisualizationMeta {
+                mode: VisualizationMode::Capture,
+                active_pad: Some(slot_index),
+                active_effect: slot.configured_type,
+                normalized_playhead: if max_phase > 0.0 {
+                    Self::finite_f32((read_phase / max_phase).clamp(0.0, 1.0))
+                } else {
+                    0.0
+                },
+                reverse: buffer.repeat_reverse,
+                play_rate: Self::finite_f32(buffer.play_rate),
+                duration_seconds: Self::finite_f32(sample_count as f64 / self.sample_rate.max(1.0)),
             };
+        }
 
-            VisualizationMeta {
-                mode,
-                active_pad: self.active_buffer_slot,
-                active_effect: self.active_buffer_type,
-                normalized_playhead,
-                reverse: self.repeat_reverse,
-                play_rate: Self::finite_f32(self.play_rate),
-                duration_seconds,
-            }
+        let tempo = if tempo.is_finite() {
+            tempo.max(1.0)
         } else {
-            VisualizationMeta {
-                mode,
-                active_pad: None,
-                active_effect: EffectType::Off,
-                normalized_playhead: 1.0,
-                reverse: false,
-                play_rate: 1.0,
-                duration_seconds,
-            }
+            120.0
+        };
+        let history_len = self.rolling_l.len().min(self.rolling_r.len());
+        let requested = (4.0 * self.sample_rate.max(1.0) * 60.0 / tempo).round() as usize;
+        let sample_count = requested.max(1).min(history_len);
+        let start = Self::wrap_length(
+            self.rolling_write_pos as i64 - sample_count as i64,
+            history_len,
+        );
+        Self::fill_visualization_bins(&self.rolling_l, &self.rolling_r, start, sample_count, bins);
+        VisualizationMeta {
+            mode: VisualizationMode::Rolling,
+            active_pad: None,
+            active_effect: EffectType::Off,
+            normalized_playhead: 1.0,
+            reverse: false,
+            play_rate: 1.0,
+            duration_seconds: Self::finite_f32(sample_count as f64 / self.sample_rate.max(1.0)),
         }
     }
 
     fn fill_visualization_bins(
-        &self,
+        history_l: &[f32],
+        history_r: &[f32],
         start: usize,
         sample_count: usize,
         bins: &mut [VisualizationBin],
     ) {
-        if bins.is_empty() || sample_count == 0 || self.buffer_l.is_empty() {
+        if bins.is_empty() || sample_count == 0 || history_l.is_empty() {
             return;
         }
 
+        let history_len = history_l.len().min(history_r.len());
         let bin_count = bins.len();
         for (bin_index, bin) in bins.iter_mut().enumerate() {
             let first_offset = bin_index * sample_count / bin_count;
@@ -849,21 +1125,19 @@ impl Engine {
             if end_offset <= first_offset {
                 end_offset = (first_offset + 1).min(sample_count);
             }
-
-            let first_index = self.wrap(start as i64 + first_offset as i64);
-            let first_l = Self::finite_f32(self.buffer_l[first_index]);
-            let first_r = Self::finite_f32(self.buffer_r[first_index]);
+            let first_index = Self::wrap_length(start as i64 + first_offset as i64, history_len);
+            let first_l = Self::finite_f32(f64::from(history_l[first_index]));
+            let first_r = Self::finite_f32(f64::from(history_r[first_index]));
             let mut result = VisualizationBin {
                 min_l: first_l,
                 max_l: first_l,
                 min_r: first_r,
                 max_r: first_r,
             };
-
             for offset in first_offset + 1..end_offset {
-                let index = self.wrap(start as i64 + offset as i64);
-                let sample_l = Self::finite_f32(self.buffer_l[index]);
-                let sample_r = Self::finite_f32(self.buffer_r[index]);
+                let index = Self::wrap_length(start as i64 + offset as i64, history_len);
+                let sample_l = Self::finite_f32(f64::from(history_l[index]));
+                let sample_r = Self::finite_f32(f64::from(history_r[index]));
                 result.min_l = result.min_l.min(sample_l);
                 result.max_l = result.max_l.max(sample_l);
                 result.min_r = result.min_r.min(sample_r);
@@ -878,40 +1152,12 @@ impl Engine {
         if value.is_finite() { value } else { 0.0 }
     }
 
-    fn update_press_order(&mut self, state: &PerformanceState) {
-        for pad in 0..NUM_PADS {
-            if state.held[pad] && !self.last_held[pad] {
-                self.press_counter = self.press_counter.wrapping_add(1);
-                self.press_order[pad] = self.press_counter;
-            }
-            self.last_held[pad] = state.held[pad];
-        }
+    fn finite_f64(value: f64) -> f64 {
+        if value.is_finite() { value } else { 0.0 }
     }
 
-    fn matches_category(effect: EffectType, category: Category) -> bool {
-        match category {
-            Category::Buffer => effect.is_buffer(),
-            Category::Gate => effect == EffectType::Gate,
-            Category::BandLow => effect == EffectType::BandLow,
-            Category::BandMid => effect == EffectType::BandMid,
-            Category::BandHigh => effect == EffectType::BandHigh,
-            Category::LoFi => effect == EffectType::LoFi,
-        }
-    }
-
-    fn find_newest_held(&self, state: &PerformanceState, category: Category) -> Option<usize> {
-        let mut newest = None;
-        let mut newest_order = 0;
-        for pad in 0..NUM_PADS {
-            if state.held[pad]
-                && Self::matches_category(state.pads[pad].effect_type, category)
-                && self.press_order[pad] >= newest_order
-            {
-                newest_order = self.press_order[pad];
-                newest = Some(pad);
-            }
-        }
-        newest
+    fn wrap_length(position: i64, length: usize) -> usize {
+        position.rem_euclid(length as i64) as usize
     }
 
     fn common_wet(config: &PadConfig) -> f64 {
@@ -961,86 +1207,90 @@ impl Engine {
         }
     }
 
-    fn start_buffer_effect(&mut self, config: &PadConfig, samples_per_beat: f64) {
+    fn start_buffer_effect(buffer: &mut BufferState, config: &PadConfig, samples_per_beat: f64) {
         let slice_beats = grid_beats(config.macros[0]);
         let jitter = Self::common_jitter(config);
-        let jitter_scale = 1.0 + (self.rand_01() * 2.0 - 1.0) * jitter * 0.25;
-        self.slice_samples = (slice_beats * samples_per_beat * jitter_scale)
+        let jitter_scale = 1.0 + (buffer.rand_01() * 2.0 - 1.0) * jitter * 0.25;
+        let maximum_slice = buffer.history_l.len().saturating_sub(2).max(8);
+        buffer.slice_samples = (slice_beats * samples_per_beat * jitter_scale)
             .round()
-            .clamp(8.0, (self.buffer_l.len() - 2).max(8) as f64)
-            as i32;
-        self.repeat_active = true;
-        self.repeat_phase = 0.0;
-        self.repeat_count = 0;
-        self.repeat_reverse = config.effect_type == EffectType::Reverse;
+            .clamp(8.0, maximum_slice as f64) as i32;
+        buffer.repeat_active = true;
+        buffer.repeat_phase = 0.0;
+        buffer.repeat_count = 0;
+        buffer.repeat_reverse = config.effect_type == EffectType::Reverse;
 
-        let mut lookback = self.slice_samples
-            + (Self::common_offset(config) * f64::from(self.slice_samples)) as i32;
+        let mut lookback = buffer.slice_samples
+            + (Self::common_offset(config) * f64::from(buffer.slice_samples)) as i32;
         if config.effect_type == EffectType::BeatRepeat {
             let configured = if lookback_index(config.macros[1]) == 0 {
-                self.slice_samples
+                buffer.slice_samples
             } else {
                 (lookback_beats(config.macros[1], slice_beats) * samples_per_beat).round() as i32
             };
-            lookback = self.slice_samples.max(configured);
+            lookback = buffer.slice_samples.max(configured);
         } else if config.effect_type == EffectType::TapeStop {
             lookback = (samples_per_beat / 16.0).max(1.0) as i32
-                + (Self::common_offset(config) * f64::from(self.slice_samples)) as i32;
+                + (Self::common_offset(config) * f64::from(buffer.slice_samples)) as i32;
         }
         let jitter_offset =
-            ((self.rand_01() * 2.0 - 1.0) * jitter * f64::from(self.slice_samples)) as i32;
-        self.lookback_samples = lookback;
-        self.capture_start =
-            self.wrap(self.write_pos as i64 - i64::from(lookback) - i64::from(jitter_offset));
+            ((buffer.rand_01() * 2.0 - 1.0) * jitter * f64::from(buffer.slice_samples)) as i32;
+        buffer.lookback_samples = lookback.clamp(1, maximum_slice as i32);
+        buffer.capture_start = buffer.wrap(
+            buffer.write_pos as i64 - i64::from(buffer.lookback_samples) - i64::from(jitter_offset),
+        );
 
         if config.effect_type == EffectType::TapeStop {
-            self.stop_elapsed = 0;
-            self.stop_total_samples = self.slice_samples.max(1);
-            self.stop_curve = denormalize_linear(config.macros[1], 0.25, 4.0);
-            self.stop_start_rate = denormalize_linear(config.macros[2], 0.5, 2.0);
-            self.stop_fade = clamp_macro(config.macros[6]);
-            self.play_rate = self.stop_start_rate;
-            self.stop_amp = 1.0;
+            buffer.stop_elapsed = 0;
+            buffer.stop_total_samples = buffer.slice_samples.max(1);
+            buffer.stop_curve = denormalize_linear(config.macros[1], 0.25, 4.0);
+            buffer.stop_start_rate = denormalize_linear(config.macros[2], 0.5, 2.0);
+            buffer.stop_fade = clamp_macro(config.macros[6]);
+            buffer.play_rate = buffer.stop_start_rate;
+            buffer.stop_amp = 1.0;
         }
     }
 
     fn process_buffer_sample(
-        &mut self,
+        buffer: &mut BufferState,
         dry: [f64; 2],
-        output: &mut [f64; 2],
         config: &PadConfig,
         performance_pitch: f64,
-    ) {
-        let max_phase = f64::from((self.slice_samples - 1).max(0));
-        let phase = self.repeat_phase.clamp(0.0, max_phase);
-        let read_phase = if self.repeat_reverse {
+    ) -> [f64; 2] {
+        let max_phase = f64::from((buffer.slice_samples - 1).max(0));
+        let phase = buffer.repeat_phase.clamp(0.0, max_phase);
+        let read_phase = if buffer.repeat_reverse {
             max_phase - phase
         } else {
             phase
         };
-        let read_a = self.wrap(self.capture_start as i64 + read_phase as i64);
-        let read_b = self.wrap(read_a as i64 + 1);
+        let read_a = buffer.wrap(buffer.capture_start as i64 + read_phase as i64);
+        let read_b = buffer.wrap(read_a as i64 + 1);
         let fraction = read_phase - read_phase.floor();
         let mut repeat = [
-            self.buffer_l[read_a] * (1.0 - fraction) + self.buffer_l[read_b] * fraction,
-            self.buffer_r[read_a] * (1.0 - fraction) + self.buffer_r[read_b] * fraction,
+            f64::from(buffer.history_l[read_a]) * (1.0 - fraction)
+                + f64::from(buffer.history_l[read_b]) * fraction,
+            f64::from(buffer.history_r[read_a]) * (1.0 - fraction)
+                + f64::from(buffer.history_r[read_b]) * fraction,
         ];
         let mut amplitude =
-            10.0_f64.powf(-Self::common_decay(config) * f64::from(self.repeat_count) / 20.0);
+            10.0_f64.powf(-Self::common_decay(config) * f64::from(buffer.repeat_count) / 20.0);
         if config.effect_type == EffectType::TapeStop {
-            let progress =
-                (f64::from(self.stop_elapsed) / f64::from(self.stop_total_samples)).clamp(0.0, 1.0);
-            self.play_rate = self.stop_start_rate * (1.0 - progress).max(0.0).powf(self.stop_curve);
-            amplitude = 1.0 - self.stop_fade * progress;
-            self.stop_amp = amplitude;
-            self.stop_elapsed += 1;
+            let progress = (f64::from(buffer.stop_elapsed) / f64::from(buffer.stop_total_samples))
+                .clamp(0.0, 1.0);
+            buffer.play_rate =
+                buffer.stop_start_rate * (1.0 - progress).max(0.0).powf(buffer.stop_curve);
+            amplitude = 1.0 - buffer.stop_fade * progress;
+            buffer.stop_amp = amplitude;
+            buffer.stop_elapsed += 1;
         } else {
             let pitch = (Self::common_pitch(config) + performance_pitch).clamp(-48.0, 48.0);
-            self.play_rate = 2.0_f64.powf(pitch / 12.0);
+            buffer.play_rate = 2.0_f64.powf(pitch / 12.0);
         }
         repeat[0] *= amplitude;
         repeat[1] *= amplitude;
         let wet = Self::common_wet(config);
+        let mut output = dry;
         for channel in 0..2 {
             output[channel] = if Self::common_insert(config) {
                 dry[channel] * (1.0 - wet) + repeat[channel] * wet
@@ -1048,11 +1298,12 @@ impl Engine {
                 dry[channel] + repeat[channel] * wet
             };
         }
-        self.repeat_phase += self.play_rate;
-        while self.repeat_phase >= f64::from(self.slice_samples) && self.slice_samples > 0 {
-            self.repeat_phase -= f64::from(self.slice_samples);
-            self.repeat_count += 1;
+        buffer.repeat_phase += buffer.play_rate;
+        while buffer.repeat_phase >= f64::from(buffer.slice_samples) && buffer.slice_samples > 0 {
+            buffer.repeat_phase -= f64::from(buffer.slice_samples);
+            buffer.repeat_count += 1;
         }
+        output
     }
 
     fn one_pole(input: f64, state: &mut f64, cutoff: f64, sample_rate: f64) -> f64 {
@@ -1062,76 +1313,64 @@ impl Engine {
         *state
     }
 
-    fn apply_bands(
-        &mut self,
-        sample: &mut [f64; 2],
-        state: &PerformanceState,
-        low_slot: Option<usize>,
-        mid_slot: Option<usize>,
-        high_slot: Option<usize>,
-    ) {
-        if low_slot.is_none() && mid_slot.is_none() && high_slot.is_none() {
-            return;
-        }
-        let dry = *sample;
-        let mut band = [0.0; 2];
-        let mut maximum_wet: f64 = 0.0;
-        if let Some(slot) = low_slot {
-            let config = &state.pads[slot];
-            let cutoff = denormalize_linear(config.macros[0], 80.0, 2000.0);
-            let wet = clamp_macro(config.macros[1]);
-            for channel in 0..2 {
-                band[channel] += Self::one_pole(
-                    dry[channel],
-                    &mut self.low_state[channel],
-                    cutoff,
-                    self.sample_rate,
-                ) * wet;
-            }
-            maximum_wet = maximum_wet.max(wet);
-        }
-        if let Some(slot) = mid_slot {
-            let config = &state.pads[slot];
-            let low_cutoff = denormalize_linear(config.macros[0], 80.0, 4000.0);
-            let high_cutoff =
-                denormalize_linear(config.macros[1], 500.0, 16000.0).max(low_cutoff + 20.0);
-            let wet = clamp_macro(config.macros[2]);
-            for channel in 0..2 {
-                let low = Self::one_pole(
-                    dry[channel],
-                    &mut self.mid_low_state[channel],
-                    low_cutoff,
-                    self.sample_rate,
-                );
-                let high = Self::one_pole(
-                    dry[channel],
-                    &mut self.mid_high_state[channel],
-                    high_cutoff,
-                    self.sample_rate,
-                );
-                band[channel] += (high - low) * wet;
-            }
-            maximum_wet = maximum_wet.max(wet);
-        }
-        if let Some(slot) = high_slot {
-            let config = &state.pads[slot];
-            let cutoff = denormalize_linear(config.macros[0], 1000.0, 16000.0);
-            let wet = clamp_macro(config.macros[1]);
-            for channel in 0..2 {
-                band[channel] += (dry[channel]
-                    - Self::one_pole(
+    fn apply_band(
+        slot: &mut SlotRuntime,
+        dry: [f64; 2],
+        config: &PadConfig,
+        sample_rate: f64,
+    ) -> [f64; 2] {
+        let mut output = dry;
+        match config.effect_type {
+            EffectType::BandLow => {
+                let cutoff = denormalize_linear(config.macros[0], 80.0, 2000.0);
+                let wet = clamp_macro(config.macros[1]);
+                for channel in 0..2 {
+                    let filtered = Self::one_pole(
                         dry[channel],
-                        &mut self.high_state[channel],
+                        &mut slot.filter_a[channel],
                         cutoff,
-                        self.sample_rate,
-                    ))
-                    * wet;
+                        sample_rate,
+                    );
+                    output[channel] = dry[channel] * (1.0 - wet) + filtered * wet;
+                }
             }
-            maximum_wet = maximum_wet.max(wet);
+            EffectType::BandMid => {
+                let low_cutoff = denormalize_linear(config.macros[0], 80.0, 4000.0);
+                let high_cutoff =
+                    denormalize_linear(config.macros[1], 500.0, 16000.0).max(low_cutoff + 20.0);
+                let wet = clamp_macro(config.macros[2]);
+                for channel in 0..2 {
+                    let low = Self::one_pole(
+                        dry[channel],
+                        &mut slot.filter_a[channel],
+                        low_cutoff,
+                        sample_rate,
+                    );
+                    let high = Self::one_pole(
+                        dry[channel],
+                        &mut slot.filter_b[channel],
+                        high_cutoff,
+                        sample_rate,
+                    );
+                    output[channel] = dry[channel] * (1.0 - wet) + (high - low) * wet;
+                }
+            }
+            EffectType::BandHigh => {
+                let cutoff = denormalize_linear(config.macros[0], 1000.0, 16000.0);
+                let wet = clamp_macro(config.macros[1]);
+                for channel in 0..2 {
+                    let low = Self::one_pole(
+                        dry[channel],
+                        &mut slot.filter_a[channel],
+                        cutoff,
+                        sample_rate,
+                    );
+                    output[channel] = dry[channel] * (1.0 - wet) + (dry[channel] - low) * wet;
+                }
+            }
+            _ => {}
         }
-        for channel in 0..2 {
-            sample[channel] = dry[channel] * (1.0 - maximum_wet) + band[channel];
-        }
+        output
     }
 
     fn quantize(sample: f64, bits: i32) -> f64 {
@@ -1140,61 +1379,50 @@ impl Engine {
         (sample.clamp(-1.0, 1.0) * steps).round() / steps
     }
 
-    fn apply_lofi(&mut self, sample: &mut [f64; 2], state: &PerformanceState, slot: Option<usize>) {
-        let Some(slot) = slot else {
-            self.lofi_counter = 0;
-            self.lofi_held = *sample;
-            return;
-        };
-        let config = &state.pads[slot];
+    fn apply_lofi(
+        slot: &mut SlotRuntime,
+        dry: [f64; 2],
+        config: &PadConfig,
+        sample_rate: f64,
+    ) -> [f64; 2] {
         let target_rate = denormalize_linear(config.macros[0], 1000.0, 44100.0);
         let bits = denormalize_linear(config.macros[1], 2.0, 16.0).round() as i32;
         let wet = clamp_macro(config.macros[2]);
-        let dry = *sample;
-        let hold_samples = (self.sample_rate / target_rate).round().max(1.0) as i32;
-        if self.lofi_counter <= 0 {
-            self.lofi_held = [
-                Self::quantize(sample[0], bits),
-                Self::quantize(sample[1], bits),
-            ];
-            self.lofi_counter = hold_samples;
+        let hold_samples = (sample_rate / target_rate).round().max(1.0) as i32;
+        if slot.lofi_counter <= 0 {
+            slot.lofi_held = [Self::quantize(dry[0], bits), Self::quantize(dry[1], bits)];
+            slot.lofi_counter = hold_samples;
         }
+        let mut output = dry;
         for channel in 0..2 {
-            sample[channel] = dry[channel] * (1.0 - wet) + self.lofi_held[channel] * wet;
+            output[channel] = dry[channel] * (1.0 - wet) + slot.lofi_held[channel] * wet;
         }
-        self.lofi_counter -= 1;
+        slot.lofi_counter -= 1;
+        output
     }
 
     fn apply_gate(
-        &mut self,
-        sample: &mut [f64; 2],
-        state: &PerformanceState,
-        slot: Option<usize>,
+        slot: &mut SlotRuntime,
+        sample: [f64; 2],
+        config: &PadConfig,
+        sample_rate: f64,
         samples_per_beat: f64,
-    ) {
-        let mut target = 1.0;
-        let mut attack_ms = 1.0;
-        let mut release_ms = 1.0;
-        if let Some(slot) = slot {
-            let config = &state.pads[slot];
-            let period = (grid_beats(config.macros[0]) * samples_per_beat).max(2.0);
-            let duty = denormalize_linear(config.macros[1], 5.0, 95.0) * 0.01;
-            let depth = clamp_macro(config.macros[2]);
-            attack_ms = denormalize_linear(config.macros[3], 0.0, 20.0);
-            release_ms = denormalize_linear(config.macros[4], 0.0, 100.0);
-            target = if self.gate_phase < period * duty {
-                1.0
-            } else {
-                1.0 - depth
-            };
-            self.gate_phase += 1.0;
-            if self.gate_phase >= period {
-                self.gate_phase %= period;
-            }
+    ) -> [f64; 2] {
+        let period = (grid_beats(config.macros[0]) * samples_per_beat).max(2.0);
+        let duty = denormalize_linear(config.macros[1], 5.0, 95.0) * 0.01;
+        let depth = clamp_macro(config.macros[2]);
+        let attack_ms = denormalize_linear(config.macros[3], 0.0, 20.0);
+        let release_ms = denormalize_linear(config.macros[4], 0.0, 100.0);
+        let target = if slot.gate_phase < period * duty {
+            1.0
         } else {
-            self.gate_phase = 0.0;
+            1.0 - depth
+        };
+        slot.gate_phase += 1.0;
+        if slot.gate_phase >= period {
+            slot.gate_phase %= period;
         }
-        let time_ms = if target > self.gate_gain {
+        let time_ms = if target > slot.gate_gain {
             attack_ms
         } else {
             release_ms
@@ -1202,24 +1430,14 @@ impl Engine {
         let slew = if time_ms <= 0.0 {
             1.0
         } else {
-            1.0 / (self.sample_rate * time_ms * 0.001).max(1.0)
+            1.0 / (sample_rate * time_ms * 0.001).max(1.0)
         };
-        if self.gate_gain < target {
-            self.gate_gain = (self.gate_gain + slew).min(target);
-        } else if self.gate_gain > target {
-            self.gate_gain = (self.gate_gain - slew).max(target);
+        if slot.gate_gain < target {
+            slot.gate_gain = (slot.gate_gain + slew).min(target);
+        } else if slot.gate_gain > target {
+            slot.gate_gain = (slot.gate_gain - slew).max(target);
         }
-        sample[0] *= self.gate_gain;
-        sample[1] *= self.gate_gain;
-    }
-
-    fn wrap(&self, position: i64) -> usize {
-        position.rem_euclid(self.buffer_l.len() as i64) as usize
-    }
-
-    fn rand_01(&mut self) -> f64 {
-        self.rng = self.rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        f64::from((self.rng >> 8) & 0x00ff_ffff) / 16_777_216.0
+        [sample[0] * slot.gate_gain, sample[1] * slot.gate_gain]
     }
 }
 
@@ -1439,24 +1657,430 @@ mod tests {
     }
 
     #[test]
-    fn newest_buffer_press_has_priority_and_release_restores_previous() {
-        let mut engine = Engine::default();
-        engine.reset(1_000.0);
+    fn active_cap_suspends_oldest_and_restores_most_recent_held() {
+        let mut engine = Engine::new(1_000.0);
+        let mut state = PerformanceState::default();
+        for slot in 0..8 {
+            state.pads[slot] = default_pad_config(EffectType::Gate);
+        }
+        state.pads[8] = default_pad_config(EffectType::PitchUp);
+
+        state.held[..6].fill(true);
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert_eq!(engine.admission_meta().active_mask, 0b00_111111);
+
+        state.held[6] = true;
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert_eq!(engine.admission_meta().active_mask, 0b01_111110);
+        assert_eq!(engine.admission_meta().suspended_mask, 0b00_000001);
+
+        state.held[7] = true;
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert_eq!(engine.admission_meta().active_mask, 0b11_111100);
+        assert_eq!(engine.admission_meta().suspended_mask, 0b00_000011);
+
+        state.held[8] = true;
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        let meta = engine.admission_meta();
+        assert_eq!(meta.active_mask, 0b11_111100);
+        assert_eq!(meta.suspended_mask, 0b00_000011);
+        assert_ne!(meta.held_mask & (1 << 8), 0);
+
+        state.held[7] = false;
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert_eq!(engine.admission_meta().active_mask, 0b01_111110);
+        assert_eq!(engine.admission_meta().suspended_mask, 0b00_000001);
+
+        state.held[6] = false;
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert_eq!(engine.admission_meta().active_mask, 0b00_111111);
+        assert_eq!(engine.admission_meta().suspended_mask, 0);
+    }
+
+    #[test]
+    fn duplicate_exact_gate_stages_stack_serially() {
+        let input = vec![0.75; 128];
+        let mut one = PerformanceState::default();
+        one.pads[0] = default_pad_config(EffectType::Gate);
+        one.pads[0].macros[1] = 0.0;
+        one.pads[0].macros[2] = 0.5;
+        one.pads[0].macros[3] = 0.0;
+        one.pads[0].macros[4] = 0.0;
+        one.held[0] = true;
+
+        let mut two = one;
+        two.pads[1] = one.pads[0];
+        two.held[1] = true;
+
+        let mut one_engine = Engine::new(1_000.0);
+        let mut two_engine = Engine::new(1_000.0);
+        let mut one_output = vec![0.0; input.len()];
+        let mut two_output = vec![0.0; input.len()];
+        let mut scratch = vec![0.0; input.len()];
+        one_engine.process(&input, &input, &mut one_output, &mut scratch, 120.0, &one);
+        two_engine.process(&input, &input, &mut two_output, &mut scratch, 120.0, &two);
+
+        assert_ne!(one_output, input);
+        assert_ne!(two_output, one_output);
+        assert!(
+            two_output
+                .iter()
+                .zip(&one_output)
+                .any(|(two, one)| two < one)
+        );
+    }
+
+    #[test]
+    fn chain_order_is_slot_order_not_press_order() {
+        let input: Vec<f64> = (0..256)
+            .map(|sample| (f64::from(sample) * 0.113).sin() * 0.8)
+            .collect();
+        let mut state = PerformanceState::default();
+        state.pads[0] = default_pad_config(EffectType::LoFi);
+        state.pads[1] = default_pad_config(EffectType::BandLow);
+
+        let render_press_order = |first: usize, second: usize| {
+            let mut engine = Engine::new(2_000.0);
+            let mut staged = state;
+            staged.held[first] = true;
+            engine.process(&[], &[], &mut [], &mut [], 120.0, &staged);
+            staged.held[second] = true;
+            engine.process(&[], &[], &mut [], &mut [], 120.0, &staged);
+            let mut output = vec![0.0; input.len()];
+            let mut right = vec![0.0; input.len()];
+            engine.process(&input, &input, &mut output, &mut right, 120.0, &staged);
+            output
+        };
+        let forward_press = render_press_order(0, 1);
+        let reverse_press = render_press_order(1, 0);
+        assert_eq!(forward_press, reverse_press);
+
+        let mut swapped = state;
+        swapped.pads.swap(0, 1);
+        swapped.held[0] = true;
+        swapped.held[1] = true;
+        let mut engine = Engine::new(2_000.0);
+        let mut swapped_output = vec![0.0; input.len()];
+        let mut right = vec![0.0; input.len()];
+        engine.process(
+            &input,
+            &input,
+            &mut swapped_output,
+            &mut right,
+            120.0,
+            &swapped,
+        );
+        assert_ne!(forward_press, swapped_output);
+    }
+
+    #[test]
+    fn each_stage_wet_dry_is_local_to_its_input() {
+        let input: Vec<f64> = (0..192)
+            .map(|sample| (f64::from(sample) * 0.17).sin() * 0.9)
+            .collect();
+        let mut serial = PerformanceState::default();
+        serial.pads[0] = default_pad_config(EffectType::BandLow);
+        serial.pads[0].macros[1] = 0.45;
+        serial.pads[1] = default_pad_config(EffectType::LoFi);
+        serial.pads[1].macros[2] = 0.35;
+        serial.held[0] = true;
+        serial.held[1] = true;
+
+        let mut serial_engine = Engine::new(2_000.0);
+        let mut serial_output = vec![0.0; input.len()];
+        let mut scratch = vec![0.0; input.len()];
+        serial_engine.process(
+            &input,
+            &input,
+            &mut serial_output,
+            &mut scratch,
+            120.0,
+            &serial,
+        );
+
+        let mut first_state = PerformanceState::default();
+        first_state.pads[0] = serial.pads[0];
+        first_state.held[0] = true;
+        let mut first_engine = Engine::new(2_000.0);
+        let mut first_output = vec![0.0; input.len()];
+        first_engine.process(
+            &input,
+            &input,
+            &mut first_output,
+            &mut scratch,
+            120.0,
+            &first_state,
+        );
+
+        let mut second_state = PerformanceState::default();
+        second_state.pads[0] = serial.pads[1];
+        second_state.held[0] = true;
+        let mut second_engine = Engine::new(2_000.0);
+        let mut staged_output = vec![0.0; input.len()];
+        second_engine.process(
+            &first_output,
+            &first_output,
+            &mut staged_output,
+            &mut scratch,
+            120.0,
+            &second_state,
+        );
+
+        assert_eq!(serial_output, staged_output);
+    }
+
+    #[test]
+    fn configured_buffer_histories_capture_their_own_stage_inputs() {
+        let input: Vec<f64> = (0..64)
+            .map(|sample| (f64::from(sample) * 0.19).sin() * 0.77)
+            .collect();
+        let mut state = PerformanceState::default();
+        state.pads[0] = default_pad_config(EffectType::BandLow);
+        state.pads[1] = default_pad_config(EffectType::BeatRepeat);
+        state.pads[2] = default_pad_config(EffectType::BeatRepeat);
+        state.pads[3] = default_pad_config(EffectType::LoFi);
+        state.held[0] = true;
+        state.held[3] = true;
+
+        let mut engine = Engine::new(1_000.0);
+        let mut output = vec![0.0; input.len()];
+        let mut right = vec![0.0; input.len()];
+        engine.process(&input, &input, &mut output, &mut right, 120.0, &state);
+
+        assert!(
+            engine.slots[1].buffer.history_l[..input.len()]
+                .iter()
+                .zip(&input)
+                .any(|(captured, input)| *captured != *input as f32)
+        );
+        assert_eq!(
+            &engine.slots[1].buffer.history_l[..input.len()],
+            &engine.slots[2].buffer.history_l[..input.len()]
+        );
+        assert_ne!(
+            engine.slots[1].buffer.history_l.as_ptr(),
+            engine.slots[2].buffer.history_l.as_ptr()
+        );
+
+        let mut upstream_buffer = PerformanceState::default();
+        upstream_buffer.pads[0] = default_pad_config(EffectType::BeatRepeat);
+        upstream_buffer.pads[1] = default_pad_config(EffectType::LoFi);
+        upstream_buffer.held[1] = true;
+        let mut engine = Engine::new(1_000.0);
+        engine.process(
+            &input,
+            &input,
+            &mut output,
+            &mut right,
+            120.0,
+            &upstream_buffer,
+        );
+        assert_eq!(
+            &engine.slots[0].buffer.history_l[..input.len()],
+            input
+                .iter()
+                .map(|sample| *sample as f32)
+                .collect::<Vec<_>>()
+        );
+        assert_ne!(output, input);
+    }
+
+    #[test]
+    fn suspension_freezes_processor_state_while_buffer_history_keeps_recording() {
+        let mut state = PerformanceState::default();
+        state.pads[0] = default_pad_config(EffectType::BeatRepeat);
+        state.held[0] = true;
+        for slot in 1..=6 {
+            state.pads[slot] = default_pad_config(EffectType::Gate);
+        }
+        state.held[1..=5].fill(true);
+
+        let mut engine = Engine::new(1_000.0);
         let input = vec![0.25; 32];
-        let mut left = vec![0.0; 32];
-        let mut right = vec![0.0; 32];
+        let mut output = vec![0.0; input.len()];
+        let mut right = vec![0.0; input.len()];
+        engine.process(&input, &input, &mut output, &mut right, 120.0, &state);
+        let phase = engine.slots[0].buffer.repeat_phase;
+        let write_pos = engine.slots[0].buffer.write_pos;
+
+        state.held[6] = true;
+        engine.process(&input, &input, &mut output, &mut right, 120.0, &state);
+        assert_ne!(engine.admission_meta().suspended_mask & 1, 0);
+        assert_eq!(engine.slots[0].buffer.repeat_phase, phase);
+        assert_ne!(engine.slots[0].buffer.write_pos, write_pos);
+
+        state.held[6] = false;
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert_ne!(engine.admission_meta().active_mask & 1, 0);
+        assert_eq!(engine.slots[0].buffer.repeat_phase, phase);
+    }
+
+    #[test]
+    fn release_resets_processor_but_configured_buffer_history_continues() {
+        let mut state = PerformanceState::default();
+        state.pads[0] = default_pad_config(EffectType::Reverse);
+        let mut engine = Engine::new(1_000.0);
+        let input = vec![0.5; 24];
+        let mut output = vec![0.0; input.len()];
+        let mut right = vec![0.0; input.len()];
+        engine.process(&input, &input, &mut output, &mut right, 120.0, &state);
+        state.held[0] = true;
+        engine.process(&input, &input, &mut output, &mut right, 120.0, &state);
+        assert!(engine.slots[0].buffer.repeat_phase > 0.0);
+
+        state.held[0] = false;
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert!(!engine.slots[0].buffer.repeat_active);
+        assert_eq!(engine.slots[0].buffer.repeat_phase, 0.0);
+        let write_pos = engine.slots[0].buffer.write_pos;
+        engine.process(&input, &input, &mut output, &mut right, 120.0, &state);
+        assert_ne!(engine.slots[0].buffer.write_pos, write_pos);
+        assert_eq!(engine.slots[0].buffer.history_l[write_pos], 0.5);
+    }
+
+    #[test]
+    fn buffer_type_changes_preserve_history_and_nonbuffer_to_buffer_is_cold() {
+        let mut state = PerformanceState::default();
+        state.pads[0] = default_pad_config(EffectType::BeatRepeat);
+        let mut engine = Engine::new(1_000.0);
+        let input: Vec<f64> = (1..=32).map(f64::from).collect();
+        let mut output = vec![0.0; input.len()];
+        let mut right = vec![0.0; input.len()];
+        engine.process(&input, &input, &mut output, &mut right, 120.0, &state);
+        let history = engine.slots[0].buffer.history_l.clone();
+        let write_pos = engine.slots[0].buffer.write_pos;
+
+        state.pads[0] = default_pad_config(EffectType::Reverse);
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert_eq!(engine.slots[0].buffer.history_l, history);
+        assert_eq!(engine.slots[0].buffer.write_pos, write_pos);
+        assert!(!engine.slots[0].buffer.repeat_active);
+
+        state.pads[0] = default_pad_config(EffectType::Gate);
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        state.pads[0] = default_pad_config(EffectType::TapeStop);
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert_eq!(engine.slots[0].buffer.write_pos, 0);
+        assert!(
+            engine.slots[0]
+                .buffer
+                .history_l
+                .iter()
+                .all(|sample| *sample == 0.0)
+        );
+    }
+
+    #[test]
+    fn reset_prepares_eight_seconds_of_independent_stereo_f32_history() {
+        let engine = Engine::new(1_000.0);
+        let history_len = engine.slots[0].buffer.history_l.len();
+        assert!(history_len >= 8_000);
+        assert_eq!(
+            std::mem::size_of_val(&engine.slots[0].buffer.history_l[0]),
+            4
+        );
+        assert!(engine.slots.iter().all(|slot| {
+            slot.buffer.history_l.len() == history_len && slot.buffer.history_r.len() == history_len
+        }));
+        assert_eq!(
+            engine.history_bytes(),
+            (NUM_PADS + 1) * 2 * history_len * std::mem::size_of::<f32>()
+        );
+    }
+
+    #[test]
+    fn duplicate_buffer_processors_stack_with_local_wet_dry() {
+        let pre_roll: Vec<f64> = (0..128)
+            .map(|sample| (f64::from(sample) * 0.071).sin() * 0.8)
+            .collect();
+        let performance: Vec<f64> = (0..128)
+            .map(|sample| (f64::from(sample) * 0.137).cos() * 0.6)
+            .collect();
+        let mut one = PerformanceState::default();
+        one.pads[0] = default_pad_config(EffectType::BeatRepeat);
+        one.pads[0].macros[2] = 0.5;
+        one.pads[1] = one.pads[0];
+
+        let render = |hold_second: bool| {
+            let mut engine = Engine::new(1_000.0);
+            let mut output = vec![0.0; pre_roll.len()];
+            let mut right = vec![0.0; pre_roll.len()];
+            engine.process(&pre_roll, &pre_roll, &mut output, &mut right, 120.0, &one);
+            let mut held = one;
+            held.held[0] = true;
+            held.held[1] = hold_second;
+            engine.process(&[], &[], &mut [], &mut [], 120.0, &held);
+            engine.process(
+                &performance,
+                &performance,
+                &mut output,
+                &mut right,
+                120.0,
+                &held,
+            );
+            output
+        };
+
+        let one_stage = render(false);
+        let two_stages = render(true);
+        assert_ne!(one_stage, two_stages);
+    }
+
+    #[test]
+    fn visualization_prefers_selected_held_buffer_then_lowest_active_buffer() {
+        let mut engine = Engine::new(1_000.0);
         let mut state = PerformanceState::default();
         state.pads[0] = default_pad_config(EffectType::BeatRepeat);
         state.pads[1] = default_pad_config(EffectType::Reverse);
+        let input: Vec<f64> = (0..256)
+            .map(|sample| (f64::from(sample) * 0.03).sin())
+            .collect();
+        let mut output = vec![0.0; input.len()];
+        let mut right = vec![0.0; input.len()];
+        engine.process(&input, &input, &mut output, &mut right, 120.0, &state);
         state.held[0] = true;
-        engine.process(&input, &input, &mut left, &mut right, 120.0, &state);
-        assert_eq!(engine.active_buffer_slot(), Some(0));
         state.held[1] = true;
-        engine.process(&input, &input, &mut left, &mut right, 120.0, &state);
-        assert_eq!(engine.active_buffer_slot(), Some(1));
-        state.held[1] = false;
-        engine.process(&input, &input, &mut left, &mut right, 120.0, &state);
-        assert_eq!(engine.active_buffer_slot(), Some(0));
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+
+        let mut bins = [VisualizationBin::default(); 8];
+        assert_eq!(
+            engine.fill_visualization(120.0, &mut bins).active_pad,
+            Some(0)
+        );
+        engine.set_visualization_selected_slot(Some(1));
+        assert_eq!(
+            engine.fill_visualization(120.0, &mut bins).active_pad,
+            Some(1)
+        );
+        engine.set_visualization_selected_slot(Some(2));
+        assert_eq!(
+            engine.fill_visualization(120.0, &mut bins).active_pad,
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn clear_transient_clears_runtime_masks_and_all_histories() {
+        let mut engine = Engine::new(1_000.0);
+        let mut state = PerformanceState::default();
+        state.pads[0] = default_pad_config(EffectType::BeatRepeat);
+        state.pads[1] = default_pad_config(EffectType::Gate);
+        state.held[0] = true;
+        state.held[1] = true;
+        let input = vec![0.5; 32];
+        let mut output = vec![0.0; input.len()];
+        let mut right = vec![0.0; input.len()];
+        engine.process(&input, &input, &mut output, &mut right, 120.0, &state);
+        assert_ne!(engine.admission_meta().active_mask, 0);
+
+        engine.clear_transient();
+        assert_eq!(engine.admission_meta(), AdmissionMeta::default());
+        assert!(engine.rolling_l.iter().all(|sample| *sample == 0.0));
+        assert!(engine.slots.iter().all(|slot| {
+            slot.buffer.history_l.iter().all(|sample| *sample == 0.0)
+                && slot.buffer.history_r.iter().all(|sample| *sample == 0.0)
+                && !slot.buffer.repeat_active
+        }));
     }
 
     #[test]
@@ -1516,18 +2140,18 @@ mod tests {
         let input_r: Vec<f64> = input_l.iter().map(|sample| *sample + 1_000.0).collect();
         let mut output_l = vec![0.0; input_l.len()];
         let mut output_r = vec![0.0; input_l.len()];
+        let mut state = PerformanceState::default();
+        state.pads[3] = default_pad_config(EffectType::Reverse);
+        state.pads[3].macros[0] = grid_normalized(0);
         engine.process(
             &input_l,
             &input_r,
             &mut output_l,
             &mut output_r,
             60.0,
-            &PerformanceState::default(),
+            &state,
         );
 
-        let mut state = PerformanceState::default();
-        state.pads[3] = default_pad_config(EffectType::Reverse);
-        state.pads[3].macros[0] = grid_normalized(0);
         state.held[3] = true;
         engine.process(&[], &[], &mut [], &mut [], 60.0, &state);
 

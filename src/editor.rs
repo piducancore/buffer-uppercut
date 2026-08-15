@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -7,8 +8,8 @@ use buffer_uppercut_dsp::{EffectType, VisualizationBin, VisualizationMode, forma
 use buffer_uppercut_kit::{FACTORY_KIT_COUNT, Kit, factory_kit};
 use truce::core::editor::PluginContextReadF32;
 use truce::prelude::{Editor, Params, PluginContext};
-use truce_slint::SlintEditor;
 use truce_slint::slint::{Model, ModelRc, SharedString, VecModel, include_modules};
+use truce_slint::{PhysicalKeyboardEvent, SlintEditor};
 
 use crate::params::{
     BufferUppercutParams, NUM_MACROS, NUM_PADS, PARAM_PERFORMANCE_PITCH_ID, WaveformSnapshot,
@@ -46,7 +47,10 @@ impl EditorPreview {
 }
 
 pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
-    let editor = SlintEditor::new(params, configured_editor_size(), move |state| {
+    params.initialize_direct_keys_enabled(standalone_direct_keys_default(
+        std::env::current_exe().ok().as_deref(),
+    ));
+    let editor = SlintEditor::new(params.clone(), configured_editor_size(), move |state| {
         let ui = BufferUppercutUi::new().expect("create Buffer Uppercut Slint editor");
         let editor_preview = configured_editor_preview();
         let selected_pad = Rc::new(Cell::new(
@@ -55,6 +59,8 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         let auto_select_midi = Rc::new(Cell::new(true));
         let factory_kit_index = Rc::new(Cell::new(Some(0_usize)));
         let last_midi_press_sequence = Rc::new(Cell::new(state.params().midi_pad_press_event().0));
+        let last_direct_key_press_sequence =
+            Rc::new(Cell::new(state.params().direct_key_press_event().0));
         let active_macro_gestures: Rc<[Cell<Option<u32>>; NUM_MACROS]> =
             Rc::new(std::array::from_fn(|_| Cell::new(None)));
 
@@ -95,6 +101,12 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         }
         {
             let state = state.clone();
+            ui.on_direct_keys_toggled(move |enabled| {
+                state.params().set_direct_keys_enabled(enabled);
+            });
+        }
+        {
+            let state = state.clone();
             let selected_pad = selected_pad.clone();
             let factory_kit_index = factory_kit_index.clone();
             ui.on_previous_kit(move || {
@@ -123,17 +135,14 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
             ui.on_pad_pressed(move |pad| {
                 let pad = valid_pad_index(pad);
                 selected_pad.set(pad);
-                let id = pad_trigger_id(pad);
-                state.begin_edit(id);
-                state.set_param(id, 1.0);
+                state.params().set_visualization_selected_pad(pad);
+                state.params().set_pointer_held(pad, true);
             });
         }
         {
             let state = state.clone();
             ui.on_pad_released(move |pad| {
-                let id = pad_trigger_id(valid_pad_index(pad));
-                state.set_param(id, 0.0);
-                state.end_edit(id);
+                state.params().set_pointer_held(valid_pad_index(pad), false);
             });
         }
         {
@@ -195,9 +204,20 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                 }
             }
 
+            let (direct_press_sequence, direct_pressed_pad) =
+                state.params().direct_key_press_event();
+            if direct_press_sequence != last_direct_key_press_sequence.get() {
+                last_direct_key_press_sequence.set(direct_press_sequence);
+                if let Some(pad) = direct_pressed_pad {
+                    selected_pad.set(pad);
+                }
+            }
+
             let selected = selected_pad.get().min(NUM_PADS - 1);
+            state.params().set_visualization_selected_pad(selected);
             ui.set_selected_pad(selected as i32);
             ui.set_auto_select(auto_select_midi.get());
+            ui.set_direct_keys(state.params().direct_keys_enabled());
             ui.set_kit_display(SharedString::from(state.params().kit_name()));
 
             let transport = state.transport();
@@ -214,6 +234,9 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
             ));
 
             let midi_held_bits = state.params().midi_held_pad_bits();
+            let direct_key_held_bits = state.params().direct_key_held_pad_bits();
+            let pointer_held_bits = state.params().pointer_held_pad_bits();
+            let (active_pad_bits, suspended_pad_bits) = state.params().admission_pad_bits();
             for pad in 0..NUM_PADS {
                 let effect = selected_effect(state, pad);
                 let trigger_held = state.get_param(pad_trigger_id(pad)) >= 0.5;
@@ -221,12 +244,17 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                     pad,
                     PadView {
                         number: SharedString::from(format!("{:02}", pad + 1)),
+                        key: SharedString::from(physical_key_label(pad)),
                         note: SharedString::from(format!("{}", pad + 60)),
                         effect: SharedString::from(effect_abbreviation(effect)),
                         effect_index: effect as i32,
                         held: trigger_held
                             || midi_held_bits & (1_u16 << pad) != 0
+                            || direct_key_held_bits & (1_u16 << pad) != 0
+                            || pointer_held_bits & (1_u16 << pad) != 0
                             || editor_preview.and_then(EditorPreview::held_pad) == Some(pad),
+                        active: active_pad_bits & (1_u16 << pad) != 0,
+                        suspended: suspended_pad_bits & (1_u16 << pad) != 0,
                         selected: pad == selected,
                     },
                 );
@@ -272,6 +300,23 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
     })
     .resizable(true)
     .min_size((920, 620))
+    .physical_keyboard_input({
+        let params = params.clone();
+        move |event| match event {
+            PhysicalKeyboardEvent::Key {
+                code,
+                pressed,
+                repeat,
+            } => crate::midi::pad_for_physical_key(code)
+                .is_some_and(|pad| params.apply_direct_key(pad, pressed, repeat)),
+            PhysicalKeyboardEvent::FocusChanged(false) | PhysicalKeyboardEvent::EditorClosed => {
+                params.clear_direct_key_holds();
+                params.clear_pointer_holds();
+                false
+            }
+            PhysicalKeyboardEvent::FocusChanged(true) => false,
+        }
+    })
     .keyboard_passthrough(true);
 
     Box::new(editor)
@@ -299,8 +344,11 @@ fn apply_kit(state: &PluginContext<BufferUppercutParams>, kit: &Kit, selected_pa
         }
     }
     state.params().set_kit_name(&kit.name);
+    state.params().clear_direct_key_holds();
+    state.params().clear_pointer_holds();
     state.params().request_kit_reset();
     selected_pad.set(0);
+    state.params().set_visualization_selected_pad(0);
 }
 
 fn configured_editor_size() -> (u32, u32) {
@@ -388,12 +436,29 @@ fn valid_macro_index(index: i32) -> Option<usize> {
 fn empty_pad_view(pad: usize) -> PadView {
     PadView {
         number: SharedString::from(format!("{:02}", pad + 1)),
+        key: SharedString::from(physical_key_label(pad)),
         note: SharedString::from(format!("{}", pad + 60)),
         effect: SharedString::default(),
         effect_index: EffectType::Off as i32,
         held: false,
+        active: false,
+        suspended: false,
         selected: pad == 0,
     }
+}
+
+const fn physical_key_label(pad: usize) -> &'static str {
+    let pad = if pad < NUM_PADS { pad } else { NUM_PADS - 1 };
+    [
+        "1", "2", "3", "4", "Q", "W", "E", "R", "A", "S", "D", "F", "Z", "X", "C", "V",
+    ][pad]
+}
+
+fn standalone_direct_keys_default(executable: Option<&Path>) -> bool {
+    executable
+        .and_then(Path::file_stem)
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.eq_ignore_ascii_case("buffer-uppercut-standalone"))
 }
 
 fn empty_macro_view(control: usize) -> MacroView {
@@ -530,6 +595,17 @@ mod tests {
         assert_eq!(parse_editor_preview("pitch"), Some(EditorPreview::Pitch));
         assert_eq!(parse_editor_preview("rolling"), None);
         assert_eq!(parse_editor_preview("CAPTURED"), None);
+    }
+
+    #[test]
+    fn direct_keys_default_only_for_the_dedicated_standalone_executable() {
+        assert!(standalone_direct_keys_default(Some(Path::new(
+            "/Applications/Buffer Uppercut.app/Contents/MacOS/buffer-uppercut-standalone"
+        ))));
+        assert!(!standalone_direct_keys_default(Some(Path::new(
+            "/Applications/REAPER.app/Contents/MacOS/REAPER"
+        ))));
+        assert!(!standalone_direct_keys_default(None));
     }
 
     #[test]

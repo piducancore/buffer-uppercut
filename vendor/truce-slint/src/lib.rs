@@ -52,6 +52,21 @@ pub use truce_core::editor::PluginContext;
 // Re-export slint so plugin authors can use it without a direct dependency.
 pub use slint;
 
+/// Physical key identity reported by the native window backend.
+pub use keyboard_types::Code as PhysicalKeyCode;
+
+/// Generic native keyboard and focus events available to editor integrations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PhysicalKeyboardEvent {
+    Key {
+        code: PhysicalKeyCode,
+        pressed: bool,
+        repeat: bool,
+    },
+    FocusChanged(bool),
+    EditorClosed,
+}
+
 // Re-export paste (used by the bind! macro).
 #[doc(hidden)]
 pub use paste::paste;

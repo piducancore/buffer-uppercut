@@ -366,6 +366,29 @@ mod tests {
     }
 
     #[test]
+    fn version_one_preserves_sixteen_independent_same_type_slots() {
+        assert_eq!(KIT_VERSION, 1);
+
+        let mut kit = classic_kit();
+        kit.state.pads[0] = default_pad_config(EffectType::Gate);
+        kit.state.pads[1] = default_pad_config(EffectType::Gate);
+        kit.state.pads[0].macros[0] = 0.125;
+        kit.state.pads[1].macros[0] = 0.875;
+        kit.state.held[0] = true;
+        kit.state.held[15] = true;
+
+        let encoded = encode(&kit);
+        assert_eq!(u32::from_le_bytes(encoded[12..16].try_into().unwrap()), 16);
+
+        let decoded = decode(&encoded).expect("decode independent serial slots");
+        assert_eq!(decoded.state.pads[0].effect_type, EffectType::Gate);
+        assert_eq!(decoded.state.pads[1].effect_type, EffectType::Gate);
+        assert_eq!(decoded.state.pads[0].macros[0], 0.125);
+        assert_eq!(decoded.state.pads[1].macros[0], 0.875);
+        assert!(!decoded.state.held.iter().any(|held| *held));
+    }
+
+    #[test]
     fn codec_rejects_wrong_versions_layouts_and_trailing_bytes() {
         let encoded = encode(&classic_kit());
 

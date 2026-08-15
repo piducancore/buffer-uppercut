@@ -2,10 +2,13 @@ import "JetBrainsMono-Regular.ttf";
 
 export struct PadView {
     number: string,
+    key: string,
     note: string,
     effect: string,
     effect-index: int,
     held: bool,
+    active: bool,
+    suspended: bool,
     selected: bool,
 }
 
@@ -240,21 +243,25 @@ component PerformancePad inherits Rectangle {
     min-height: 0px;
     preferred-width: 112px;
     preferred-height: 58px;
-    background: touch.pressed || root.data.held
-        ? #eaff00
+    background: root.data.suspended
+        ? #21100a
+        : touch.pressed || root.data.held ? #eaff00
         : root.data.selected ? #f2efe4 : #111111;
-    border-width: root.data.selected || root.data.held ? 3px : 1px;
-    border-color: root.data.held ? #eaff00 : root.data.selected ? #f2efe4 : #5a5953;
+    border-width: root.data.selected || root.data.held || root.data.active || root.data.suspended ? 3px : 1px;
+    border-color: root.data.suspended ? #ff5b35
+        : root.data.active || root.data.held ? #eaff00
+        : root.data.selected ? #f2efe4 : #5a5953;
 
     HorizontalLayout {
         padding: 8px;
         spacing: 8px;
 
         Text {
-            width: 32px;
-            text: root.data.number;
-            color: touch.pressed || root.data.held || root.data.selected ? #080808 : #f2efe4;
-            font-size: 20px;
+            width: 38px;
+            text: root.data.key;
+            color: root.data.suspended ? #ff805f
+                : touch.pressed || root.data.held || root.data.selected ? #080808 : #f2efe4;
+            font-size: 24px;
             font-weight: 900;
             vertical-alignment: center;
         }
@@ -265,14 +272,19 @@ component PerformancePad inherits Rectangle {
 
             Text {
                 text: root.data.effect;
-                color: touch.pressed || root.data.held || root.data.selected ? #080808 : #eaff00;
+                color: root.data.suspended ? #ff805f
+                    : touch.pressed || root.data.held || root.data.selected ? #080808 : #eaff00;
                 font-size: 11px;
                 font-weight: 800;
                 overflow: elide;
             }
             Text {
-                text: "NOTE " + root.data.note;
-                color: touch.pressed || root.data.held || root.data.selected ? #292929 : #96938a;
+                text: root.data.suspended ? "SUSPENDED / " + root.data.number
+                    : root.data.active ? "ACTIVE / " + root.data.number
+                    : root.data.held ? "HELD / " + root.data.number
+                    : "MIDI " + root.data.note + " / " + root.data.number;
+                color: root.data.suspended ? #ff805f
+                    : touch.pressed || root.data.held || root.data.selected ? #292929 : #96938a;
                 font-size: 9px;
                 font-weight: 700;
             }
@@ -525,6 +537,7 @@ export component BufferUppercutUi inherits Window {
     in property <string> effect-name: "Off";
     in property <string> tempo-text: "--.-";
     in-out property <bool> auto-select: true;
+    in-out property <bool> direct-keys: false;
     in property <float> pitch-value: 0.5;
     in property <string> pitch-text: "0 st";
     in property <string> waveform-left: "";
@@ -542,6 +555,7 @@ export component BufferUppercutUi inherits Window {
     callback pitch-value-changed(float);
     callback pitch-edit-ended();
     callback auto-select-toggled(bool);
+    callback direct-keys-toggled(bool);
     callback pad-pressed(int);
     callback pad-released(int);
     callback effect-changed(int);
@@ -703,7 +717,7 @@ export component BufferUppercutUi inherits Window {
                         spacing: 8px;
 
                         Text {
-                            text: "PERFORMANCE PADS";
+                            text: "PERFORMANCE KEYS";
                             color: #f2efe4;
                             font-size: 11px;
                             font-weight: 900;
@@ -718,6 +732,15 @@ export component BufferUppercutUi inherits Window {
                                 root.auto-select-toggled(value);
                             }
                         }
+
+                        BrutalSwitch {
+                            checked: root.direct-keys;
+                            label: "DIRECT KEYS";
+                            toggled(value) => {
+                                root.direct-keys = value;
+                                root.direct-keys-toggled(value);
+                            }
+                        }
                     }
 
                     Rectangle {
@@ -726,9 +749,10 @@ export component BufferUppercutUi inherits Window {
                         vertical-stretch: 1;
 
                         for pad[index] in root.pads: PerformancePad {
-                            x: Math.mod(index, 4) * (parent.width + 7px) / 4;
+                            x: Math.mod(index, 4) * ((parent.width - 42px) / 4 + 7px)
+                                + Math.floor(index / 4) * 7px;
                             y: Math.floor(index / 4) * (parent.height + 7px) / 4;
-                            width: (parent.width - 21px) / 4;
+                            width: (parent.width - 42px) / 4;
                             height: (parent.height - 21px) / 4;
                             data: pad;
                             index: index;
@@ -818,7 +842,7 @@ export component BufferUppercutUi inherits Window {
             height: 18px;
 
             Text {
-                text: "DSP F64 / PARAMS 145 / MIDI AGGREGATED";
+                text: "DSP F64 / PARAMS 145 / 6 ACTIVE MAX / PHYSICAL KEYS";
                 color: #6c6962;
                 font-size: 9px;
                 font-weight: 700;

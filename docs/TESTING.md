@@ -8,8 +8,8 @@
 cargo test --locked --workspace
 ```
 
-This runs DSP units, wrapper/MIDI/parameter/editor tests, native kit codec
-tests, the frozen audio regression corpus, and framework-patch tests.
+This runs DSP units, wrapper/MIDI/parameter/editor tests, native kit codec tests,
+the canonical serial audio regression corpus, and framework-patch tests.
 
 ### Required before handoff
 
@@ -25,13 +25,43 @@ cargo truce build --clap --vst3
 
 ### Regression-corpus integrity
 
+V1 is frozen historical evidence. V2 is the canonical serial expectation:
+
 ```sh
 (cd contract && shasum -a 256 -c SHA256SUMS)
+(cd contract/v2 && shasum -a 256 -c SHA256SUMS)
 cargo test -p buffer-uppercut-dsp --test contract
 ```
 
-The corpus preserves the current sound. Its historical provenance is not a
-backwards-compatibility requirement.
+The contract harness must execute `contract/v2/*.budsp`. It must not make the
+intentional serial architecture pass by rewriting or silently blessing
+`contract/*.budsp`. V1 integrity is checked by its original checksum list.
+
+The v2 fixture set includes the retained broad processing scenarios plus focused
+coverage for:
+
+- two same-type stages stacking serially;
+- the six-stage cap, oldest-active suspension, and most-recently-held restore;
+- frozen processor state with configured buffer history continuing during
+  suspension;
+- release resetting processor state while configured history continues; and
+- buffer lookback captured at the slot's own serial chain position.
+
+## Focused serial checks
+
+During implementation, run:
+
+```sh
+cargo test --locked -p buffer-uppercut-dsp --lib
+cargo test --locked -p buffer-uppercut-kit
+cargo test --locked -p buffer-uppercut-dsp --test contract
+cargo test --locked -p buffer-uppercut-dsp --features rt-paranoid
+```
+
+DSP unit coverage must inspect admission masks and internal lifecycle semantics
+that sample fixtures cannot express directly. Kit tests must keep version 1,
+16 slots, seven macros, independent repeated same-type configurations, and
+non-persistence of momentary held state.
 
 ## Slint screenshots
 
@@ -45,10 +75,9 @@ BUFFER_UPPERCUT_EDITOR_PREVIEW=captured cargo truce screenshot --out screenshots
 ```
 
 The default, minimum, and wide baselines exercise rolling history. The captured
-baseline exercises fixed layout geometry, capture emphasis, and held-pad
-hierarchy.
-Additional state baselines for MIDI-held, reverse, and disabled-macro states
-remain roadmap work.
+baseline exercises fixed layout geometry, capture emphasis, and held-slot
+hierarchy. Additional state baselines for direct-key-held, MIDI-held, reverse,
+suspended, and disabled-macro states remain roadmap work.
 
 ## Validators
 
@@ -73,16 +102,54 @@ Quit and reopen REAPER after installing a new build.
 - Both instantiate on mono and stereo tracks.
 - Editor opens at default size, resizes to the minimum, closes, and reopens.
 - Plugin unload and project close do not hang or crash.
+- Activation/sample-rate changes, kit application, and host state restore clear
+  every history and reset admission/processor state.
+- Transport start, stop, seek, loop, tempo, and position changes preserve held,
+  processor, admission, and history state.
 
-### Audio and performance
+### Audio and serial performance
 
-- Dry audio passes unchanged with no pad held.
-- Exercise repeat, reverse, tape stop, gate, all pitch actions, three bands,
-  and LoFi.
-- Verify overlapping/layered effects and newest-buffer-pad priority.
+- Dry audio passes unchanged with no slot held.
+- Exercise repeat, reverse, tape stop, gate, all pitch actions, three bands, and
+  LoFi.
+- Hold two gates, two bands, two LoFi stages, and two buffer stages in separate
+  trials. Confirm repeated exact types stack instead of replacing one another.
+- Press the same configured slots in different orders. Confirm audible stage
+  order remains ascending slot number.
+- Confirm each stage's wet/dry control is local to its chain input.
+- Hold six continuous slots, then press a seventh and eighth. Confirm each new
+  request is heard, the oldest admitted active slot suspends, and suspended slots
+  remain visibly held.
+- Release capacity in stages. Confirm still-held suspended slots restore
+  most-recently-held first but resume at ascending slot positions.
+- Suspend a buffer stage, feed distinctive audio, then restore it. Confirm its
+  processor resumes frozen phase/capture state and its lookback includes audio
+  recorded while suspended.
+- Release a configured buffer, feed distinctive audio, and press it again.
+  Confirm processor state restarts while lookback uses the continuously recorded
+  history.
+- Place an active filter before a configured buffer slot. Confirm later lookback
+  contains the filtered chain-position signal, not raw host input.
+- Automate buffer-to-buffer and non-buffer-to-buffer type changes. Confirm
+  preserved versus cold history behavior.
 - Change project tempo and buffer size while processing.
-- Confirm rolling history, captured slice, reverse playhead, and tape-stop
-  rate displays.
+- Confirm rolling history, selected captured slice, suspended frozen playhead,
+  reverse playhead, and tape-stop rate displays.
+
+### Direct computer keys
+
+1. With direct keys disabled in CLAP/VST3, verify `1234/QWER/ASDF/ZXCV` and
+   unmapped keys remain available to REAPER.
+2. Enable **DIRECT KEYS** and verify the four rows map to slots 1 through 16 by
+   physical position.
+3. Verify key release ends only the direct-key hold when MIDI, automation, or
+   pointer still holds the same slot.
+4. Verify repeated key-down events do not create stuck or duplicate releases.
+5. Verify pitch-action slots fire once per aggregate released-to-held edge.
+6. Test one non-US keyboard layout and confirm the physical positions do not
+   move with produced characters.
+7. In standalone, verify direct keys are enabled by default.
+8. Disable direct keys again and confirm host keyboard behavior returns.
 
 ### MIDI
 
@@ -91,23 +158,32 @@ Quit and reopen REAPER after installing a new build.
 3. Arm the track and enable input monitoring.
 4. Enable **Send all keyboard input** when typing with another window active.
 5. Verify notes `60..75` stopped and playing.
-6. Verify pad illumination and Auto-select MIDI.
+6. Verify slot illumination and Auto-select MIDI.
 7. Verify pitch aliases `57..59` and `81..83`.
-8. Keep the editor focused and confirm unused key events still reach REAPER.
+8. Hold the same note from two MIDI channels and release them separately. The
+   slot must remain held until both channels release it.
+9. Combine MIDI with direct-key, automation, and pointer holds on one slot;
+   release each source independently.
+10. Keep the editor focused with direct keys disabled and confirm unused key
+    events still reach REAPER.
 
 ### Automation and state
 
-- Record and play back pad triggers, effect selection, macros, and performance
+- Record and play back slot triggers, effect selection, macros, and performance
   pitch.
 - Confirm continuous controls produce clean begin/set/end gestures.
-- Save, close, and reopen the project; verify parameters and kit name.
+- Save, close, and reopen the project; verify all 145 parameters and kit name.
+- Confirm state restoration releases transient holds and clears processor,
+  admission, rolling-history, and slot-history state.
 - Reopen the editor and verify selected effect labels/values are correct.
 
 ### Kits
 
 - Browse Classic, Glitch Grid, Tape Lab, and Filter & Pitch.
-- Confirm each change selects pad 1, releases triggers, and clears captured
-  audio.
+- Confirm each change selects slot 1, releases every input-source hold, clears
+  admission and every history, and resets processor state.
+- Save and reload a kit with two same-type slots using different macros. Confirm
+  both configurations survive and the file remains kit version 1.
 
 ### Presets
 
@@ -118,14 +194,16 @@ Quit and reopen REAPER after installing a new build.
 - Confirm the embedded editor contains no duplicate LOAD/SAVE buttons and opens
   no platform file dialogs.
 
-## Benchmark
+## Benchmark and memory
 
 ```sh
 cargo run --locked -p buffer-uppercut-dsp --release --example benchmark
 ```
 
-Use at least five like-for-like runs for a controlled comparison. A repeatable
+Use at least five like-for-like runs for active caps one through six. A repeatable
 audio-callback regression above 10% blocks sign-off unless explicitly accepted.
+Record activation memory at common sample rates, including the next-power-of-two
+cost of 16 stereo eight-second `f32` histories plus rolling history.
 
 ## Definition of done
 
@@ -134,6 +212,7 @@ A feature is complete when:
 - focused tests cover its behavior and failure cases;
 - workspace, Clippy, formatting, and `rt-paranoid` pass;
 - advertised formats build;
+- both corpus checksum sets pass and the canonical v2 harness passes;
 - screenshots or DAW checks cover visible/host-facing changes;
 - authoritative contracts, architecture, roadmap, and ADRs are updated;
 - no build products, installed bundles, or caches are committed.

@@ -64,6 +64,9 @@ impl PluginLogic for BufferUppercut {
         state.held_pads_by_channel = [0; 16];
         state.previous_held = [false; NUM_PADS];
         params.set_midi_held_pad_bits(0);
+        params.clear_direct_key_holds();
+        params.clear_pointer_holds();
+        params.set_admission_pad_bits(0, 0);
         state.performance_pitch = params
             .get_plain(params::PARAM_PERFORMANCE_PITCH_ID)
             .unwrap_or_default()
@@ -72,6 +75,9 @@ impl PluginLogic for BufferUppercut {
         state.sample_rate = config.sample_rate.max(1.0);
         state.visualization_countdown = 0;
         state.kit_reset_sequence = params.kit_reset_sequence();
+        state
+            .engine
+            .set_visualization_selected_slot(Some(params.visualization_selected_pad()));
         let meta = state
             .engine
             .fill_visualization(state.last_tempo, &mut state.visualization_scratch);
@@ -127,6 +133,9 @@ impl PluginLogic for BufferUppercut {
         }
         state.previous_held = performance.held;
         performance.performance_pitch = state.performance_pitch;
+        state
+            .engine
+            .set_visualization_selected_slot(Some(params.visualization_selected_pad()));
 
         let frames = buffer.num_samples();
         debug_assert!(frames <= state.input_l.len());
@@ -156,6 +165,8 @@ impl PluginLogic for BufferUppercut {
             state.last_tempo,
             &performance,
         );
+        let admission = state.engine.admission_meta();
+        params.set_admission_pad_bits(admission.active_mask, admission.suspended_mask);
         if frames >= state.visualization_countdown {
             let meta = state
                 .engine
@@ -201,6 +212,9 @@ fn clear_transient_state(state: &mut BufferUppercut, params: &BufferUppercutPara
     state.held_pads_by_channel = [0; 16];
     state.previous_held = [false; NUM_PADS];
     params.set_midi_held_pad_bits(0);
+    params.clear_direct_key_holds();
+    params.clear_pointer_holds();
+    params.set_admission_pad_bits(0, 0);
     state.visualization_countdown = 0;
 }
 
@@ -217,6 +231,8 @@ fn performance_state(
     held_pads_by_channel: &[u16; 16],
 ) -> PerformanceState {
     let midi_held = aggregate_midi_held(held_pads_by_channel);
+    let direct_key_held = params.direct_key_held_pad_bits();
+    let pointer_held = params.pointer_held_pad_bits();
     let mut state = PerformanceState::default();
     for pad in 0..NUM_PADS {
         let effect_index = params
@@ -237,7 +253,11 @@ fn performance_state(
             .get_plain(params::pad_trigger_id(pad))
             .unwrap_or_default()
             >= 0.5;
-        state.held[pad] = trigger || (midi_held & (1_u16 << pad)) != 0;
+        let bit = 1_u16 << pad;
+        state.held[pad] = trigger
+            || (midi_held & bit) != 0
+            || (direct_key_held & bit) != 0
+            || (pointer_held & bit) != 0;
     }
     state
 }
@@ -271,14 +291,32 @@ mod tests {
     }
 
     #[test]
-    fn midi_and_trigger_parameters_are_aggregated() {
+    fn parameter_midi_direct_key_and_pointer_holds_are_aggregated_independently() {
         let params = BufferUppercutParams::default();
         params.set_plain(params::pad_trigger_id(2), 1.0);
+        params.set_direct_keys_enabled(true);
+        assert!(params.apply_direct_key(5, true, false));
+        params.set_pointer_held(9, true);
         let mut midi = [0_u16; 16];
         midi[15] = 1 << 7;
         let state = performance_state(&params, &midi);
         assert!(state.held[2]);
+        assert!(state.held[5]);
         assert!(state.held[7]);
+        assert!(state.held[9]);
+
+        assert!(params.apply_direct_key(5, false, false));
+        let state = performance_state(&params, &midi);
+        assert!(state.held[2]);
+        assert!(!state.held[5]);
+        assert!(state.held[7]);
+        assert!(state.held[9]);
+
+        params.set_pointer_held(9, false);
+        let state = performance_state(&params, &midi);
+        assert!(state.held[2]);
+        assert!(state.held[7]);
+        assert!(!state.held[9]);
     }
 
     #[test]
@@ -326,6 +364,42 @@ mod tests {
         );
         assert!(output_l.iter().all(|sample| sample.is_finite()));
         assert_ne!(output_l, input_l);
+    }
+
+    #[test]
+    fn wrapper_publishes_active_and_suspended_slot_masks() {
+        let params = BufferUppercutParams::default();
+        for pad in 0..7 {
+            params.set_plain(params::pad_type_id(pad), EffectType::Gate as i32 as f64);
+        }
+        let mut state = BufferUppercut::default();
+        <BufferUppercut as PluginLogic>::reset(&mut state, &params, &AudioConfig::new(8_000.0, 8));
+        params.set_direct_keys_enabled(true);
+        for pad in 0..7 {
+            assert!(params.apply_direct_key(pad, true, false));
+        }
+
+        let input_l = [0.0; 8];
+        let input_r = [0.0; 8];
+        let mut output_l = [0.0; 8];
+        let mut output_r = [0.0; 8];
+        let input_refs = [&input_l[..], &input_r[..]];
+        let mut output_refs = [&mut output_l[..], &mut output_r[..]];
+        let mut buffer = AudioBuffer::from_slices_checked(&input_refs, &mut output_refs, 8);
+        let events = EventList::with_capacity(0);
+        let transport = TransportInfo::for_screenshot();
+        let mut output_events = EventList::with_capacity(0);
+        let mut context = ProcessContext::new(&transport, 8_000.0, 8, &mut output_events);
+
+        <BufferUppercut as PluginLogic>::process(
+            &mut state,
+            &params,
+            &mut buffer,
+            &events,
+            &mut context,
+        );
+
+        assert_eq!(params.admission_pad_bits(), (0b0111_1110, 0b0000_0001));
     }
 
     #[test]

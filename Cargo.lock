@@ -556,6 +556,7 @@ dependencies = [
  "buffer-uppercut-dsp",
  "buffer-uppercut-kit",
  "clap-sys",
+ "keyboard-types",
  "slint",
  "truce",
  "truce-clap",

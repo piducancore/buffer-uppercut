@@ -27,6 +27,7 @@ use truce_core::editor::{Editor, PluginContext, RawWindowHandle};
 use truce_gui::ios::{TouchPhase, fnv1a_64, ivar_offset};
 use truce_params::Params;
 
+use crate::PhysicalKeyboardEvent;
 use crate::platform::{create_slint_window, ensure_platform, render_to_rgba};
 
 pub type SyncFn<P> = Box<dyn Fn(&PluginContext<P>)>;
@@ -117,6 +118,15 @@ impl<P: Params + 'static> SlintEditor<P> {
     /// baseview keyboard events to return to a parent host.
     #[must_use]
     pub fn keyboard_passthrough(self, _passthrough: bool) -> Self {
+        self
+    }
+
+    /// Keep the desktop physical-key callback builder available on iOS.
+    #[must_use]
+    pub fn physical_keyboard_input(
+        self,
+        _callback: impl Fn(PhysicalKeyboardEvent) -> bool + Send + Sync + 'static,
+    ) -> Self {
         self
     }
 

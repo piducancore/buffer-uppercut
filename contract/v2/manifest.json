@@ -1,0 +1,113 @@
+{
+  "contract": "dsp-contract-v2-serial",
+  "reference_engine": "dsp/src/lib.rs",
+  "decision_record": "docs/adr/0004-serial-performance-slots.md",
+  "fixture_format": "BUDSP_CONTRACT tab-separated text version 2",
+  "canonical_precision": "IEEE-754 binary64 processing with binary32 history storage",
+  "comparison": {
+    "absolute_tolerance": 1e-07,
+    "relative_tolerance": 1e-07,
+    "finite_outputs_required": true
+  },
+  "event_timing": "State changes apply at block boundaries",
+  "topology": "At most six active continuous processors in ascending slot order",
+  "provenance": "Approved canonical Rust serial implementation; v1 inputs retained where applicable and four serial-specific scenarios added",
+  "fixtures": [
+    {
+      "path": "00-dry-stereo-variable-blocks.budsp",
+      "sha256": "f571d5f21ba371d30c48261906deb8a08dc6dd55b3ec350f6c36c4d818c7e956"
+    },
+    {
+      "path": "01-dry-mono.budsp",
+      "sha256": "50c10be7db72f26efa975e03af557a21331a4bb5a7f2fd4d14918f612d0ffa50"
+    },
+    {
+      "path": "02-default-effect-0-off.budsp",
+      "sha256": "50ba953517f9718fbe53fb77333d80e82e2006fe66b0d9434a3919900face008"
+    },
+    {
+      "path": "03-default-effect-1-beat-repeat.budsp",
+      "sha256": "b7101d37bfbdfdff73cf6190ea0d64fee6aed9539435f25c7030a68af1dadee9"
+    },
+    {
+      "path": "04-default-effect-2-reverse.budsp",
+      "sha256": "703988481a4ab90e93838f4fde3192ec49f7f7b1889d75aea1dfd9ea26f922f4"
+    },
+    {
+      "path": "05-default-effect-3-tape-stop.budsp",
+      "sha256": "3c7ae7921f22049d8c2f6fb5b2f5b446153fece8334bf4f7306f38badc6994fe"
+    },
+    {
+      "path": "06-default-effect-4-gate.budsp",
+      "sha256": "1b9a8bdb7ed1833a3492c6f76e2ea623703c38ed28c569e84fb95fd47cfecd1a"
+    },
+    {
+      "path": "07-default-effect-5-pitch-down.budsp",
+      "sha256": "9fc0ab961e031b90a42d8318f1c118efc1641571fd381f6e382cd4e269b29096"
+    },
+    {
+      "path": "08-default-effect-6-pitch-reset.budsp",
+      "sha256": "aa84b9b9b37b25eb66a2160b27a7259027ef79e6d76616f89b079de4fcb99226"
+    },
+    {
+      "path": "09-default-effect-7-pitch-up.budsp",
+      "sha256": "734fa21d43f0385f8502088bb4b23dc8dc42e423c8ad9c3fe234326bd1f7b4ba"
+    },
+    {
+      "path": "10-default-effect-8-band-low.budsp",
+      "sha256": "66a880362ca87c67bf2f285748930ec207c432d9c5721edd5f46fbab3a8bca69"
+    },
+    {
+      "path": "11-default-effect-9-band-mid.budsp",
+      "sha256": "8b9aa3f9fc89ea7c60ade2376b3edb1073c2edc2a4c6c0ca09955eeca24640c2"
+    },
+    {
+      "path": "12-default-effect-10-band-high.budsp",
+      "sha256": "9bf5ff6640e380692806743875ca3b85d3dae581236504060fe550b370c15d50"
+    },
+    {
+      "path": "13-default-effect-11-lofi.budsp",
+      "sha256": "0a343927a2439404af1425ec4ee8c4437a93e64f9708229b94271c37504a29bd"
+    },
+    {
+      "path": "14-buffer-macro-extremes-tempo-pitch.budsp",
+      "sha256": "c5025ad2d6f3a50edd6d477073ab10df00400fa967450a6d88a8c2f21efbb075"
+    },
+    {
+      "path": "15-buffer-priority-and-restore.budsp",
+      "sha256": "e6a4f341a46a18b5ad1478eda94cf331f567d124a9363908c720f047b25cb94e"
+    },
+    {
+      "path": "16-layered-bands-lofi-gate.budsp",
+      "sha256": "6b785cf7338219242668466ab808857d38b54bbdf2b860209a68222391aa77fd"
+    },
+    {
+      "path": "17-deterministic-jitter-a.budsp",
+      "sha256": "7ab9647f8a87f99919a83ba8b4d4c8265f674584d905edb0dd8f1a347ab8a787"
+    },
+    {
+      "path": "18-deterministic-jitter-after-reset.budsp",
+      "sha256": "70e057b923c81b88468f9f07c287437f80c87221a78e84148b91f72ef9985918"
+    },
+    {
+      "path": "19-serial-duplicate-gates.budsp",
+      "sha256": "e0cd420b26e9485ebfd8bafcc42022b70776a089f838a3e49c8dc01eb4e11905"
+    },
+    {
+      "path": "20-six-stage-cap-suspend-restore.budsp",
+      "sha256": "21e790746e34a17ff864abfb60bdd8306c676e8cf96cc3234b779f8861e02ed2"
+    },
+    {
+      "path": "21-buffer-history-suspend-release.budsp",
+      "sha256": "e17b7e2234d3419573d958ba3cb964c80a47e22c10ae714bce483cc2eca415a4"
+    },
+    {
+      "path": "22-buffer-history-chain-position.budsp",
+      "sha256": "5d02139d8ae3bda9ebafee30e4ac5d7a7789a3ccc24d8c6b4445b0a1c770d4d5"
+    },
+    {
+      "path": "pitch-actions.budsp",
+      "sha256": "e332a5729c680b7bb75a803cd48baedee0ce6e0b9683510bebdb20e7c0d675b0"
+    }
+  ]
+}

@@ -31,8 +31,12 @@ struct Sample {
     expected_r: f64,
 }
 
-fn contract_dir() -> PathBuf {
+fn contract_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../contract")
+}
+
+fn serial_contract_dir() -> PathBuf {
+    contract_root().join("v2")
 }
 
 fn parse_fixture(text: &str) -> Fixture {
@@ -112,8 +116,8 @@ fn assert_close(name: &str, block: usize, frame: usize, channel: char, actual: f
 }
 
 #[test]
-fn matches_every_frozen_processing_fixture() {
-    let mut paths: Vec<_> = fs::read_dir(contract_dir())
+fn matches_every_canonical_serial_processing_fixture() {
+    let mut paths: Vec<_> = fs::read_dir(serial_contract_dir())
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .filter(|path| {
@@ -123,10 +127,12 @@ fn matches_every_frozen_processing_fixture() {
         })
         .collect();
     paths.sort();
-    assert_eq!(paths.len(), 19);
+    assert_eq!(paths.len(), 23);
 
     for path in paths {
-        let fixture = parse_fixture(&fs::read_to_string(&path).unwrap());
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("BUDSP_CONTRACT\t2\n"));
+        let fixture = parse_fixture(&text);
         let mut engine = Engine::default();
         engine.reset(fixture.sample_rate);
         for (block_index, block) in fixture.blocks.iter().enumerate() {
@@ -175,8 +181,9 @@ fn matches_every_frozen_processing_fixture() {
 }
 
 #[test]
-fn matches_frozen_pitch_action_fixture() {
-    let text = fs::read_to_string(contract_dir().join("pitch-actions.budsp")).unwrap();
+fn matches_canonical_serial_pitch_action_fixture() {
+    let text = fs::read_to_string(serial_contract_dir().join("pitch-actions.budsp")).unwrap();
+    assert!(text.starts_with("BUDSP_PITCH_ACTIONS\t2\n"));
     let mut cases = 0;
     for line in text.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
@@ -199,8 +206,25 @@ fn matches_frozen_pitch_action_fixture() {
 
 #[test]
 fn contract_manifest_records_the_seed_corpus_provenance() {
-    let manifest = fs::read_to_string(contract_dir().join("manifest.json")).unwrap();
+    let manifest = fs::read_to_string(contract_root().join("manifest.json")).unwrap();
     assert!(manifest.contains(SEED_CPP_COMMIT));
     assert!(manifest.contains("\"contract\": \"dsp-contract-v1\""));
     assert_eq!(manifest.matches("\"sha256\"").count(), 20);
+
+    let checksums = fs::read_to_string(contract_root().join("SHA256SUMS")).unwrap();
+    assert_eq!(checksums.lines().count(), 21);
+    assert!(checksums.contains(
+        "0a126f1ce3159cf2753c2b6dae08f2a99396d5f9f066eda61409bc74b59e0c54  manifest.json"
+    ));
+}
+
+#[test]
+fn serial_contract_manifest_records_the_canonical_corpus() {
+    let manifest = fs::read_to_string(serial_contract_dir().join("manifest.json")).unwrap();
+    assert!(manifest.contains("\"contract\": \"dsp-contract-v2-serial\""));
+    assert!(manifest.contains("docs/adr/0004-serial-performance-slots.md"));
+    assert_eq!(manifest.matches("\"sha256\"").count(), 24);
+
+    let checksums = fs::read_to_string(serial_contract_dir().join("SHA256SUMS")).unwrap();
+    assert_eq!(checksums.lines().count(), 25);
 }

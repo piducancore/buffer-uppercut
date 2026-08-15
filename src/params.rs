@@ -528,6 +528,22 @@ pub struct BufferUppercutParams {
     #[skip]
     midi_pad_press_event: AtomicU32,
     #[skip]
+    direct_keys_initialized: AtomicBool,
+    #[skip]
+    direct_keys_enabled: AtomicBool,
+    #[skip]
+    direct_key_held_pad_bits: AtomicU16,
+    #[skip]
+    direct_key_press_event: AtomicU32,
+    #[skip]
+    pointer_held_pad_bits: AtomicU16,
+    #[skip]
+    active_pad_bits: AtomicU16,
+    #[skip]
+    suspended_pad_bits: AtomicU16,
+    #[skip]
+    visualization_selected_pad: AtomicU8,
+    #[skip]
     kit_reset_sequence: AtomicU32,
     #[skip]
     waveform: Arc<WaveformBridge>,
@@ -605,6 +621,120 @@ impl BufferUppercutParams {
         (event >> 8, pad)
     }
 
+    pub(crate) fn initialize_direct_keys_enabled(&self, enabled: bool) {
+        if self
+            .direct_keys_initialized
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.direct_keys_enabled.store(enabled, Ordering::Release);
+        }
+    }
+
+    pub(crate) fn set_direct_keys_enabled(&self, enabled: bool) {
+        self.direct_keys_initialized.store(true, Ordering::Release);
+        self.direct_keys_enabled.store(enabled, Ordering::Release);
+        if !enabled {
+            self.clear_direct_key_holds();
+        }
+    }
+
+    pub(crate) fn direct_keys_enabled(&self) -> bool {
+        self.direct_keys_enabled.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn apply_direct_key(&self, pad: usize, pressed: bool, repeat: bool) -> bool {
+        debug_assert!(pad < NUM_PADS);
+        if !self.direct_keys_enabled() {
+            return false;
+        }
+        if repeat {
+            return true;
+        }
+
+        let bit = 1_u16 << pad;
+        if pressed {
+            let previous = self
+                .direct_key_held_pad_bits
+                .fetch_or(bit, Ordering::AcqRel);
+            if previous & bit == 0 {
+                self.record_direct_key_press(pad);
+            }
+            if !self.direct_keys_enabled() {
+                self.direct_key_held_pad_bits
+                    .fetch_and(!bit, Ordering::Release);
+            }
+        } else {
+            self.direct_key_held_pad_bits
+                .fetch_and(!bit, Ordering::Release);
+        }
+        true
+    }
+
+    pub(crate) fn clear_direct_key_holds(&self) {
+        self.direct_key_held_pad_bits.store(0, Ordering::Release);
+    }
+
+    pub(crate) fn direct_key_held_pad_bits(&self) -> u16 {
+        self.direct_key_held_pad_bits.load(Ordering::Acquire)
+    }
+
+    fn record_direct_key_press(&self, pad: usize) {
+        let previous = self.direct_key_press_event.load(Ordering::Relaxed);
+        let sequence = ((previous >> 8).wrapping_add(1)) & 0x00ff_ffff;
+        self.direct_key_press_event
+            .store((sequence << 8) | (pad as u32 + 1), Ordering::Release);
+    }
+
+    pub(crate) fn direct_key_press_event(&self) -> (u32, Option<usize>) {
+        let event = self.direct_key_press_event.load(Ordering::Acquire);
+        let encoded_pad = event & 0xff;
+        (
+            event >> 8,
+            (encoded_pad != 0).then(|| encoded_pad as usize - 1),
+        )
+    }
+
+    pub(crate) fn set_pointer_held(&self, pad: usize, held: bool) {
+        debug_assert!(pad < NUM_PADS);
+        let bit = 1_u16 << pad;
+        if held {
+            self.pointer_held_pad_bits.fetch_or(bit, Ordering::Release);
+        } else {
+            self.pointer_held_pad_bits
+                .fetch_and(!bit, Ordering::Release);
+        }
+    }
+
+    pub(crate) fn clear_pointer_holds(&self) {
+        self.pointer_held_pad_bits.store(0, Ordering::Release);
+    }
+
+    pub(crate) fn pointer_held_pad_bits(&self) -> u16 {
+        self.pointer_held_pad_bits.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_admission_pad_bits(&self, active: u16, suspended: u16) {
+        self.active_pad_bits.store(active, Ordering::Release);
+        self.suspended_pad_bits.store(suspended, Ordering::Release);
+    }
+
+    pub(crate) fn admission_pad_bits(&self) -> (u16, u16) {
+        (
+            self.active_pad_bits.load(Ordering::Acquire),
+            self.suspended_pad_bits.load(Ordering::Acquire),
+        )
+    }
+
+    pub(crate) fn set_visualization_selected_pad(&self, pad: usize) {
+        self.visualization_selected_pad
+            .store(pad.min(NUM_PADS - 1) as u8, Ordering::Release);
+    }
+
+    pub(crate) fn visualization_selected_pad(&self) -> usize {
+        usize::from(self.visualization_selected_pad.load(Ordering::Acquire)).min(NUM_PADS - 1)
+    }
+
     pub(crate) fn publish_waveform(
         &self,
         bins: &[VisualizationBin; NUM_VISUALIZATION_BINS],
@@ -644,6 +774,55 @@ mod tests {
         assert_eq!(params.midi_pad_press_event(), (1, Some(5)));
         params.record_midi_pad_press(15);
         assert_eq!(params.midi_pad_press_event(), (2, Some(15)));
+        assert_eq!(params.count(), 145);
+    }
+
+    #[test]
+    fn direct_key_state_is_separate_repeat_safe_and_ephemeral() {
+        let params = BufferUppercutParams::default();
+        assert!(!params.direct_keys_enabled());
+        assert!(!params.apply_direct_key(3, true, false));
+        params.initialize_direct_keys_enabled(true);
+        assert!(params.apply_direct_key(3, true, false));
+        let first = params.direct_key_press_event();
+        assert_eq!(params.direct_key_held_pad_bits(), 1 << 3);
+        assert!(params.apply_direct_key(3, true, true));
+        assert!(params.apply_direct_key(3, true, false));
+        assert_eq!(params.direct_key_press_event(), first);
+        assert!(params.apply_direct_key(3, false, false));
+        assert_eq!(params.direct_key_held_pad_bits(), 0);
+        assert_eq!(params.count(), 145);
+    }
+
+    #[test]
+    fn disabling_or_clearing_direct_keys_releases_only_direct_holds() {
+        let params = BufferUppercutParams::default();
+        params.set_midi_held_pad_bits(1 << 5);
+        params.set_direct_keys_enabled(true);
+        assert!(params.apply_direct_key(5, true, false));
+        params.set_direct_keys_enabled(false);
+        assert_eq!(params.direct_key_held_pad_bits(), 0);
+        assert_eq!(params.midi_held_pad_bits(), 1 << 5);
+    }
+
+    #[test]
+    fn pointer_holds_do_not_mutate_automatable_trigger_parameters() {
+        let params = BufferUppercutParams::default();
+        assert_eq!(params.get_plain(pad_trigger_id(4)), Some(0.0));
+        params.set_pointer_held(4, true);
+        assert_eq!(params.pointer_held_pad_bits(), 1 << 4);
+        assert_eq!(params.get_plain(pad_trigger_id(4)), Some(0.0));
+        params.clear_pointer_holds();
+        assert_eq!(params.pointer_held_pad_bits(), 0);
+    }
+
+    #[test]
+    fn admission_and_visualization_selection_are_atomic_runtime_state() {
+        let params = BufferUppercutParams::default();
+        params.set_admission_pad_bits(0x003f, 0x0040);
+        params.set_visualization_selected_pad(12);
+        assert_eq!(params.admission_pad_bits(), (0x003f, 0x0040));
+        assert_eq!(params.visualization_selected_pad(), 12);
         assert_eq!(params.count(), 145);
     }
 

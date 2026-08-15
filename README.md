@@ -7,11 +7,15 @@ product implementation.
 It provides:
 
 - 16 momentary performance pads driven by the UI, automation, or MIDI notes
-  60–75;
+  60–75, plus an opt-in physical computer-key layout in plugins and a
+  default-on layout in standalone;
 - beat repeat, reverse, tape stop, gate, pitch actions, low/mid/high bands,
   and LoFi effects;
+- deterministic serial stacking in ascending slot order, including repeated
+  instances of the same effect, with a six-processor admission cap;
 - seven effect-aware macros per pad with semantic labels and values;
-- a stereo history/captured-slice waveform;
+- independent eight-second stereo `f32` histories for configured buffer slots,
+  `f64` signal processing, and a stereo history/captured-slice waveform;
 - four factory kits, host-native preset recall, and a versioned `.bupreset`
   codec;
 - host tempo, automation, state recall, MIDI illumination, and MIDI
@@ -62,6 +66,8 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace
 cargo test --locked --workspace --features rt-paranoid
 cargo truce build --clap --vst3
+(cd contract && shasum -a 256 -c SHA256SUMS)
+(cd contract/v2 && shasum -a 256 -c SHA256SUMS)
 ```
 
 Render or check the Slint editor:
