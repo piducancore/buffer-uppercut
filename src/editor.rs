@@ -263,7 +263,6 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                         key: SharedString::from(physical_key_label(pad)),
                         note: SharedString::from(format!("{}", pad + 60)),
                         effect: SharedString::from(effect_abbreviation(effect)),
-                        effect_index: effect as i32,
                         held: trigger_held
                             || midi_held_bits & (1_u16 << pad) != 0
                             || direct_key_held_bits & (1_u16 << pad) != 0
@@ -461,7 +460,6 @@ fn empty_pad_view(pad: usize) -> PadView {
         key: SharedString::from(physical_key_label(pad)),
         note: SharedString::from(format!("{}", pad + 60)),
         effect: SharedString::default(),
-        effect_index: EffectType::Off as i32,
         held: false,
         active: false,
         suspended: false,

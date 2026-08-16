@@ -15,7 +15,8 @@ It provides:
   and LoFi effects;
 - deterministic serial stacking in ascending slot order, including repeated
   instances of the same effect, with a six-processor admission cap;
-- seven effect-aware macros per pad with semantic labels and values;
+- an effect-type knob plus seven effect-aware macro knobs per pad, with semantic
+  labels and values;
 - independent eight-second stereo `f32` histories for configured buffer slots,
   `f64` signal processing, and a stereo history/captured-slice waveform;
 - four factory kits, host-native preset recall, and a versioned `.bupreset`

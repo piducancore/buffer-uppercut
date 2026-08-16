@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-08-15.
+Last updated: 2026-08-16.
 
 This file tracks current product status. Architectural rationale belongs in
 `adr/`; durable behavior belongs in `CONTRACTS.md`.
@@ -33,7 +33,8 @@ This file tracks current product status. Architectural rationale belongs in
 - Processing is allocation-free after activation according to `rt-paranoid`.
 - Three deterministic size baselines plus the captured-state baseline exist for
   the Slint editor.
-- A manual macOS REAPER smoke test passed for the earlier canonical build.
+- The current serial build loads in macOS REAPER; MIDI and focused direct-key
+  performance have been confirmed in the installed plugin.
 - Linux, Windows, and macOS CI cover formatting, Clippy, contract tests,
   `rt-paranoid`, CLAP/VST3/standalone builds, and headless validators.
 - Archived C++/WRAC state, preset, ID, and source compatibility are explicitly
