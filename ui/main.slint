@@ -303,81 +303,6 @@ component PerformancePad inherits Rectangle {
     }
 }
 
-component EffectDropdown inherits Rectangle {
-    in property <[string]> options;
-    in-out property <int> current-index: 0;
-    callback changed(int);
-
-    height: 48px;
-    background: #0a0a0a;
-    border-width: 2px;
-    border-color: open ? #eaff00 : #f2efe4;
-    property <bool> open: false;
-
-    HorizontalLayout {
-        padding: 10px;
-
-        Text {
-            text: root.options.length > 0 ? root.options[root.current-index] : "OFF";
-            color: #f2efe4;
-            font-size: 13px;
-            font-weight: 800;
-            vertical-alignment: center;
-        }
-        Text {
-            width: 38px;
-            text: root.open ? "CLOSE" : "OPEN";
-            color: #eaff00;
-            font-size: 9px;
-            font-weight: 900;
-            horizontal-alignment: right;
-            vertical-alignment: center;
-        }
-    }
-
-    TouchArea {
-        clicked => { root.open = !root.open; }
-    }
-
-    if root.open: Rectangle {
-        y: root.height + 2px;
-        width: root.width;
-        height: 288px;
-        z: 200;
-        background: #080808;
-        border-width: 2px;
-        border-color: #eaff00;
-
-        VerticalLayout {
-            padding: 4px;
-            spacing: 0px;
-
-            for option[index] in root.options: Rectangle {
-                height: 23px;
-                background: choice.has-hover || index == root.current-index ? #eaff00 : #080808;
-
-                Text {
-                    x: 8px;
-                    width: parent.width - 16px;
-                    text: option;
-                    color: choice.has-hover || index == root.current-index ? #080808 : #f2efe4;
-                    font-size: 10px;
-                    font-weight: 800;
-                    vertical-alignment: center;
-                }
-
-                choice := TouchArea {
-                    clicked => {
-                        root.current-index = index;
-                        root.open = false;
-                        root.changed(index);
-                    }
-                }
-            }
-        }
-    }
-}
-
 component WaveformPanel inherits Rectangle {
     in property <string> left-path;
     in property <string> right-path;
@@ -530,10 +455,9 @@ export component BufferUppercutUi inherits Window {
 
     in property <[PadView]> pads;
     in property <[MacroView]> macros;
-    in property <[string]> effect-options;
     in property <int> selected-pad: 0;
     in property <string> selected-pad-note: "MIDI 60";
-    in property <int> effect-index: 0;
+    in property <float> effect-value: 0.0;
     in property <string> effect-name: "Off";
     in property <string> tempo-text: "--.-";
     in-out property <bool> auto-select: true;
@@ -558,7 +482,9 @@ export component BufferUppercutUi inherits Window {
     callback direct-keys-toggled(bool);
     callback pad-pressed(int);
     callback pad-released(int);
-    callback effect-changed(int);
+    callback effect-edit-began();
+    callback effect-value-changed(float);
+    callback effect-edit-ended();
     callback macro-edit-began(int);
     callback macro-value-changed(int, float);
     callback macro-edit-ended(int);
@@ -792,37 +718,27 @@ export component BufferUppercutUi inherits Window {
                         }
                     }
 
-                    EffectDropdown {
-                        options: root.effect-options;
-                        current-index: root.effect-index;
-                        changed(index) => { root.effect-changed(index); }
-                    }
-
-                    HorizontalLayout {
-                        height: 18px;
-                        Text {
-                            text: root.effect-name;
-                            color: #eaff00;
-                            font-size: 10px;
-                            font-weight: 900;
-                        }
-                        Text {
-                            text: "CONTEXTUAL MACROS";
-                            color: #77746b;
-                            font-size: 9px;
-                            font-weight: 700;
-                            horizontal-alignment: right;
-                        }
-                    }
-
                     Rectangle {
                         background: transparent;
                         min-height: 0px;
                         vertical-stretch: 1;
 
+                        BrutalKnob {
+                            x: 0px;
+                            y: 0px;
+                            width: (parent.width - 21px) / 4;
+                            height: (parent.height - 7px) / 2;
+                            value: root.effect-value;
+                            value-text: root.effect-name;
+                            label: "EFFECT TYPE";
+                            edit-began => { root.effect-edit-began(); }
+                            value-changed(value) => { root.effect-value-changed(value); }
+                            edit-ended => { root.effect-edit-ended(); }
+                        }
+
                         for macro[index] in root.macros: BrutalKnob {
-                            x: Math.mod(index, 4) * (parent.width + 7px) / 4;
-                            y: Math.floor(index / 4) * (parent.height + 7px) / 2;
+                            x: Math.mod(index + 1, 4) * (parent.width + 7px) / 4;
+                            y: Math.floor((index + 1) / 4) * (parent.height + 7px) / 2;
                             width: (parent.width - 21px) / 4;
                             height: (parent.height - 7px) / 2;
                             value: macro.value;

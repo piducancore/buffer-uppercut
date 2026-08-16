@@ -70,15 +70,10 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         let macros = Rc::new(VecModel::from(
             (0..NUM_MACROS).map(empty_macro_view).collect::<Vec<_>>(),
         ));
-        let effect_options = Rc::new(VecModel::from(
-            (0..EFFECT_COUNT)
-                .map(|index| SharedString::from(effect_name(EffectType::from_index(index as i32))))
-                .collect::<Vec<_>>(),
-        ));
+        let active_effect_gesture = Rc::new(Cell::new(None));
 
         ui.set_pads(ModelRc::from(pads.clone()));
         ui.set_macros(ModelRc::from(macros.clone()));
-        ui.set_effect_options(ModelRc::from(effect_options));
         apply_editor_preview(&ui, editor_preview);
 
         {
@@ -148,10 +143,31 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         {
             let state = state.clone();
             let selected_pad = selected_pad.clone();
-            ui.on_effect_changed(move |index| {
-                let effect = index.clamp(0, EFFECT_COUNT as i32 - 1) as usize;
-                let normalized = truce::core::cast::discrete_norm(effect, EFFECT_COUNT);
-                state.automate(pad_type_id(selected_pad.get()), normalized);
+            let active_effect_gesture = active_effect_gesture.clone();
+            ui.on_effect_edit_began(move || {
+                let id = pad_type_id(selected_pad.get());
+                active_effect_gesture.set(Some(id));
+                state.begin_edit(id);
+            });
+        }
+        {
+            let state = state.clone();
+            let active_effect_gesture = active_effect_gesture.clone();
+            ui.on_effect_value_changed(move |value| {
+                let Some(id) = active_effect_gesture.get() else {
+                    return;
+                };
+                let effect = effect_index_from_normalized(value);
+                state.set_param(id, truce::core::cast::discrete_norm(effect, EFFECT_COUNT));
+            });
+        }
+        {
+            let state = state.clone();
+            let active_effect_gesture = active_effect_gesture.clone();
+            ui.on_effect_edit_ended(move || {
+                if let Some(id) = active_effect_gesture.take() {
+                    state.end_edit(id);
+                }
             });
         }
         {
@@ -261,7 +277,9 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
             }
 
             let effect = selected_effect(state, selected);
-            ui.set_effect_index(effect as i32);
+            ui.set_effect_value(
+                truce::core::cast::discrete_norm(effect as usize, EFFECT_COUNT) as f32,
+            );
             ui.set_effect_name(SharedString::from(effect_name(effect)));
             ui.set_selected_pad_note(SharedString::from(format!("MIDI {}", selected + 60)));
             for control in 0..NUM_MACROS {
@@ -431,6 +449,10 @@ fn valid_macro_index(index: i32) -> Option<usize> {
     usize::try_from(index)
         .ok()
         .filter(|control| *control < NUM_MACROS)
+}
+
+fn effect_index_from_normalized(value: f32) -> usize {
+    (value.clamp(0.0, 1.0) * (EFFECT_COUNT - 1) as f32).round() as usize
 }
 
 fn empty_pad_view(pad: usize) -> PadView {
@@ -606,6 +628,16 @@ mod tests {
             "/Applications/REAPER.app/Contents/MacOS/REAPER"
         ))));
         assert!(!standalone_direct_keys_default(None));
+    }
+
+    #[test]
+    fn effect_knob_quantizes_to_all_discrete_effect_types() {
+        for effect in 0..EFFECT_COUNT {
+            let normalized = truce::core::cast::discrete_norm(effect, EFFECT_COUNT) as f32;
+            assert_eq!(effect_index_from_normalized(normalized), effect);
+        }
+        assert_eq!(effect_index_from_normalized(-1.0), 0);
+        assert_eq!(effect_index_from_normalized(2.0), EFFECT_COUNT - 1);
     }
 
     #[test]
