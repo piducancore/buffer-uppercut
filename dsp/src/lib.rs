@@ -95,8 +95,8 @@ impl EffectType {
             Self::Off => 0,
             Self::Gate => 6,
             Self::PitchDown | Self::PitchReset | Self::PitchUp => 1,
-            Self::BandLow | Self::BandHigh => 2,
-            Self::BandMid | Self::LoFi => 3,
+            Self::BandLow | Self::BandMid | Self::BandHigh => NUM_MACROS,
+            Self::LoFi => 3,
             Self::BeatRepeat | Self::Reverse | Self::TapeStop => NUM_MACROS,
         }
     }
@@ -124,8 +124,24 @@ impl EffectType {
             Self::Gate => ["GRID", "DUTY", "DEPTH", "ATTACK", "RELEASE", "PHASE", ""][control],
             Self::PitchDown | Self::PitchUp => ["STEP", "", "", "", "", "", ""][control],
             Self::PitchReset => ["TARGET", "", "", "", "", "", ""][control],
-            Self::BandLow | Self::BandHigh => ["CUTOFF", "WET", "", "", "", "", ""][control],
-            Self::BandMid => ["LOW CUT", "HIGH CUT", "WET", "", "", "", ""][control],
+            Self::BandLow | Self::BandHigh => [
+                "CUTOFF",
+                "RESONANCE",
+                "DRIVE",
+                "ENVELOPE",
+                "MOTION",
+                "FEEDBACK",
+                "WET",
+            ][control],
+            Self::BandMid => [
+                "CENTER",
+                "WIDTH",
+                "RESONANCE",
+                "DRIVE",
+                "ENVELOPE",
+                "MOTION",
+                "WET",
+            ][control],
             Self::LoFi => ["RATE", "BITS", "WET", "", "", "", ""][control],
         }
     }
@@ -328,18 +344,15 @@ pub fn format_control_value(effect_type: EffectType, control: usize, normalized:
             "{:+.0} st",
             denormalize_linear(normalized, -24.0, 24.0).round()
         ),
-        EffectType::BandLow => match control {
-            0 => format!("{:.0} Hz", denormalize_linear(normalized, 80.0, 2000.0)),
-            _ => percent(normalized),
+        EffectType::BandLow | EffectType::BandHigh => match control {
+            0 => format!("{:.0} Hz", filter_frequency(normalized)),
+            1 | 3 | 4 | 5 | 6 => percent(normalized),
+            _ => format!("{:.1} dB", denormalize_linear(normalized, 0.0, 30.0)),
         },
         EffectType::BandMid => match control {
-            0 => format!("{:.0} Hz", denormalize_linear(normalized, 80.0, 4000.0)),
-            1 => format!("{:.0} Hz", denormalize_linear(normalized, 500.0, 16000.0)),
-            _ => percent(normalized),
-        },
-        EffectType::BandHigh => match control {
-            0 => format!("{:.0} Hz", denormalize_linear(normalized, 1000.0, 16000.0)),
-            _ => percent(normalized),
+            0 => format!("{:.0} Hz", filter_frequency(normalized)),
+            1 | 2 | 4 | 5 | 6 => percent(normalized),
+            _ => format!("{:.1} dB", denormalize_linear(normalized, 0.0, 30.0)),
         },
         EffectType::LoFi => match control {
             0 => format!("{:.0} Hz", denormalize_linear(normalized, 1000.0, 44100.0)),
@@ -350,6 +363,11 @@ pub fn format_control_value(effect_type: EffectType, control: usize, normalized:
             _ => percent(normalized),
         },
     }
+}
+
+#[must_use]
+pub fn filter_frequency(normalized: f64) -> f64 {
+    20.0 * (1000.0_f64).powf(clamp_macro(normalized))
 }
 
 #[must_use]
@@ -417,35 +435,35 @@ pub fn default_pad_config(effect_type: EffectType) -> PadConfig {
         }
         EffectType::BandLow => {
             config.macros = [
-                normalize_linear(260.0, 80.0, 2000.0),
+                normalize_linear(260.0_f64.ln(), 20.0_f64.ln(), 20000.0_f64.ln()),
+                0.35,
+                0.2,
+                0.0,
+                0.0,
+                0.15,
                 1.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
             ];
         }
         EffectType::BandMid => {
             config.macros = [
-                normalize_linear(260.0, 80.0, 4000.0),
-                normalize_linear(3600.0, 500.0, 16000.0),
+                normalize_linear(1200.0_f64.ln(), 20.0_f64.ln(), 20000.0_f64.ln()),
+                0.5,
+                0.35,
+                0.2,
+                0.0,
+                0.0,
                 1.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
             ];
         }
         EffectType::BandHigh => {
             config.macros = [
-                normalize_linear(3600.0, 1000.0, 16000.0),
+                normalize_linear(3600.0_f64.ln(), 20.0_f64.ln(), 20000.0_f64.ln()),
+                0.35,
+                0.2,
+                0.0,
+                0.0,
+                0.15,
                 1.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
             ];
         }
         EffectType::LoFi => {
@@ -609,6 +627,9 @@ struct SlotRuntime {
     buffer: BufferState,
     filter_a: [f64; 2],
     filter_b: [f64; 2],
+    filter_envelope: f64,
+    filter_phase: f64,
+    filter_feedback: [f64; 2],
     lofi_held: [f64; 2],
     lofi_counter: i32,
     gate_phase: f64,
@@ -628,6 +649,9 @@ impl SlotRuntime {
             buffer: BufferState::new(slot),
             filter_a: [0.0; 2],
             filter_b: [0.0; 2],
+            filter_envelope: 0.0,
+            filter_phase: 0.0,
+            filter_feedback: [0.0; 2],
             lofi_held: [0.0; 2],
             lofi_counter: 0,
             gate_phase: 0.0,
@@ -639,6 +663,9 @@ impl SlotRuntime {
         self.buffer.reset_capture();
         self.filter_a = [0.0; 2];
         self.filter_b = [0.0; 2];
+        self.filter_envelope = 0.0;
+        self.filter_phase = 0.0;
+        self.filter_feedback = [0.0; 2];
         self.lofi_held = [0.0; 2];
         self.lofi_counter = 0;
         self.gate_phase = 0.0;
@@ -803,6 +830,9 @@ impl Engine {
             }
             self.slots[slot_index].filter_a = [0.0; 2];
             self.slots[slot_index].filter_b = [0.0; 2];
+            self.slots[slot_index].filter_envelope = 0.0;
+            self.slots[slot_index].filter_phase = 0.0;
+            self.slots[slot_index].filter_feedback = [0.0; 2];
             self.slots[slot_index].lofi_held = [0.0; 2];
             self.slots[slot_index].lofi_counter = 0;
             self.slots[slot_index].gate_phase = 0.0;
@@ -1306,69 +1336,89 @@ impl Engine {
         output
     }
 
-    fn one_pole(input: f64, state: &mut f64, cutoff: f64, sample_rate: f64) -> f64 {
-        let coefficient = 1.0
-            - (-std::f64::consts::TAU * cutoff.clamp(20.0, sample_rate * 0.45) / sample_rate).exp();
-        *state += coefficient * (input - *state);
-        *state
-    }
-
     fn apply_band(
         slot: &mut SlotRuntime,
         dry: [f64; 2],
         config: &PadConfig,
         sample_rate: f64,
     ) -> [f64; 2] {
+        let input_level = dry[0].abs().max(dry[1].abs()).min(4.0);
+        let env_coefficient = 1.0
+            - (-1.0
+                / (sample_rate
+                    * if input_level > slot.filter_envelope {
+                        0.003
+                    } else {
+                        0.080
+                    }))
+            .exp();
+        slot.filter_envelope += env_coefficient * (input_level - slot.filter_envelope);
+
+        let (base, resonance, drive, envelope, motion, feedback, wet, width) =
+            match config.effect_type {
+                EffectType::BandMid => (
+                    filter_frequency(config.macros[0]),
+                    config.macros[2],
+                    config.macros[3],
+                    config.macros[4],
+                    config.macros[5],
+                    0.18 * config.macros[2],
+                    config.macros[6],
+                    config.macros[1],
+                ),
+                _ => (
+                    filter_frequency(config.macros[0]),
+                    config.macros[1],
+                    config.macros[2],
+                    config.macros[3],
+                    config.macros[4],
+                    config.macros[5],
+                    config.macros[6],
+                    0.5,
+                ),
+            };
+        let lfo = slot.filter_phase.sin();
+        slot.filter_phase = (slot.filter_phase
+            + std::f64::consts::TAU * (0.08 + 7.92 * motion * motion) / sample_rate)
+            .rem_euclid(std::f64::consts::TAU);
+        let octave_shift = envelope * slot.filter_envelope * 5.0 + motion * lfo * 2.0;
+        let maximum_cutoff = (sample_rate * 0.45).max(0.001);
+        let cutoff = (base * 2.0_f64.powf(octave_shift)).clamp(0.001, maximum_cutoff);
+        let g = (std::f64::consts::PI * cutoff / sample_rate)
+            .tan()
+            .min(12.0);
+        let q = 0.5 + 19.5 * clamp_macro(resonance).powi(2);
+        let k = 1.0 / q;
+        let gain = 10.0_f64.powf(denormalize_linear(drive, 0.0, 30.0) / 20.0);
+        let feedback_gain = 1.15 * clamp_macro(feedback);
+        let wet = clamp_macro(wet);
         let mut output = dry;
-        match config.effect_type {
-            EffectType::BandLow => {
-                let cutoff = denormalize_linear(config.macros[0], 80.0, 2000.0);
-                let wet = clamp_macro(config.macros[1]);
-                for channel in 0..2 {
-                    let filtered = Self::one_pole(
-                        dry[channel],
-                        &mut slot.filter_a[channel],
-                        cutoff,
-                        sample_rate,
-                    );
-                    output[channel] = dry[channel] * (1.0 - wet) + filtered * wet;
-                }
+        for channel in 0..2 {
+            let driven =
+                ((dry[channel] + slot.filter_feedback[channel] * feedback_gain) * gain).tanh();
+            let denominator = 1.0 + g * (g + k);
+            let v1 = (slot.filter_a[channel] + g * (driven - slot.filter_b[channel])) / denominator;
+            let v2 = slot.filter_b[channel] + g * v1;
+            slot.filter_a[channel] = 2.0 * v1 - slot.filter_a[channel];
+            slot.filter_b[channel] = 2.0 * v2 - slot.filter_b[channel];
+            let low = v2;
+            let band = v1 * (0.35 + 1.3 * width);
+            let high = driven - k * v1 - v2;
+            let filtered = match config.effect_type {
+                EffectType::BandLow => low,
+                EffectType::BandMid => band,
+                EffectType::BandHigh => high,
+                _ => driven,
+            };
+            let saturated = filtered.tanh();
+            slot.filter_feedback[channel] = saturated;
+            output[channel] = dry[channel] * (1.0 - wet) + saturated * wet;
+            if !slot.filter_a[channel].is_finite() || !slot.filter_b[channel].is_finite() {
+                slot.filter_a[channel] = 0.0;
+                slot.filter_b[channel] = 0.0;
+                slot.filter_feedback[channel] = 0.0;
+                output[channel] = dry[channel] * (1.0 - wet);
             }
-            EffectType::BandMid => {
-                let low_cutoff = denormalize_linear(config.macros[0], 80.0, 4000.0);
-                let high_cutoff =
-                    denormalize_linear(config.macros[1], 500.0, 16000.0).max(low_cutoff + 20.0);
-                let wet = clamp_macro(config.macros[2]);
-                for channel in 0..2 {
-                    let low = Self::one_pole(
-                        dry[channel],
-                        &mut slot.filter_a[channel],
-                        low_cutoff,
-                        sample_rate,
-                    );
-                    let high = Self::one_pole(
-                        dry[channel],
-                        &mut slot.filter_b[channel],
-                        high_cutoff,
-                        sample_rate,
-                    );
-                    output[channel] = dry[channel] * (1.0 - wet) + (high - low) * wet;
-                }
-            }
-            EffectType::BandHigh => {
-                let cutoff = denormalize_linear(config.macros[0], 1000.0, 16000.0);
-                let wet = clamp_macro(config.macros[1]);
-                for channel in 0..2 {
-                    let low = Self::one_pole(
-                        dry[channel],
-                        &mut slot.filter_a[channel],
-                        cutoff,
-                        sample_rate,
-                    );
-                    output[channel] = dry[channel] * (1.0 - wet) + (dry[channel] - low) * wet;
-                }
-            }
-            _ => {}
         }
         output
     }
@@ -1519,18 +1569,42 @@ mod tests {
             (EffectType::PitchUp, 1, ["STEP", "", "", "", "", "", ""]),
             (
                 EffectType::BandLow,
-                2,
-                ["CUTOFF", "WET", "", "", "", "", ""],
+                7,
+                [
+                    "CUTOFF",
+                    "RESONANCE",
+                    "DRIVE",
+                    "ENVELOPE",
+                    "MOTION",
+                    "FEEDBACK",
+                    "WET",
+                ],
             ),
             (
                 EffectType::BandMid,
-                3,
-                ["LOW CUT", "HIGH CUT", "WET", "", "", "", ""],
+                7,
+                [
+                    "CENTER",
+                    "WIDTH",
+                    "RESONANCE",
+                    "DRIVE",
+                    "ENVELOPE",
+                    "MOTION",
+                    "WET",
+                ],
             ),
             (
                 EffectType::BandHigh,
-                2,
-                ["CUTOFF", "WET", "", "", "", "", ""],
+                7,
+                [
+                    "CUTOFF",
+                    "RESONANCE",
+                    "DRIVE",
+                    "ENVELOPE",
+                    "MOTION",
+                    "FEEDBACK",
+                    "WET",
+                ],
             ),
             (EffectType::LoFi, 3, ["RATE", "BITS", "WET", "", "", "", ""]),
         ];
@@ -1582,8 +1656,8 @@ mod tests {
         assert_eq!(
             format_control_value(
                 EffectType::BandMid,
-                1,
-                normalize_linear(3600.0, 500.0, 16000.0),
+                0,
+                normalize_linear(3600.0_f64.ln(), 20.0_f64.ln(), 20000.0_f64.ln()),
             ),
             "3600 Hz"
         );
@@ -1603,7 +1677,7 @@ mod tests {
         assert_eq!(format_control_value(EffectType::LoFi, 3, 1.0), "");
         assert_eq!(
             format_control_value(EffectType::BandLow, 0, f64::NAN),
-            "80 Hz"
+            "20 Hz"
         );
     }
 
@@ -1654,6 +1728,36 @@ mod tests {
             let output = render(effect, 2_048);
             assert!(output.iter().all(|sample| sample.is_finite()), "{effect:?}");
         }
+    }
+
+    #[test]
+    fn nonlinear_filters_remain_finite_at_macro_and_sample_rate_extremes() {
+        for sample_rate in [1.0, 8_000.0, 44_100.0, 192_000.0] {
+            for effect in [
+                EffectType::BandLow,
+                EffectType::BandMid,
+                EffectType::BandHigh,
+            ] {
+                for macros in [[0.0; NUM_MACROS], [1.0; NUM_MACROS], [f64::NAN; NUM_MACROS]] {
+                    let mut engine = Engine::new(sample_rate);
+                    let mut state = PerformanceState::default();
+                    state.pads[0] = PadConfig {
+                        effect_type: effect,
+                        macros,
+                    };
+                    state.held[0] = true;
+                    let input: Vec<f64> = (0..4_096)
+                        .map(|sample| if sample % 2 == 0 { 16.0 } else { -16.0 })
+                        .collect();
+                    let mut left = vec![0.0; input.len()];
+                    let mut right = vec![0.0; input.len()];
+                    engine.process(&input, &input, &mut left, &mut right, 999.0, &state);
+                    assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+                }
+            }
+        }
+        assert_eq!(filter_frequency(f64::NAN), 20.0);
+        assert!((filter_frequency(1.0) - 20_000.0).abs() < 1.0e-9);
     }
 
     #[test]

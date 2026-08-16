@@ -55,15 +55,15 @@
     },
     {
       "path": "10-default-effect-8-band-low.budsp",
-      "sha256": "66a880362ca87c67bf2f285748930ec207c432d9c5721edd5f46fbab3a8bca69"
+      "sha256": "103fc0864ac3a43f8409148b87c1b89926d0b9ce76a07a64ea96d9a89951c5ed"
     },
     {
       "path": "11-default-effect-9-band-mid.budsp",
-      "sha256": "8b9aa3f9fc89ea7c60ade2376b3edb1073c2edc2a4c6c0ca09955eeca24640c2"
+      "sha256": "cc2a93aa98331916bbe9a391f2c001bff21cd720e8deb4799d348e90229a97a6"
     },
     {
       "path": "12-default-effect-10-band-high.budsp",
-      "sha256": "9bf5ff6640e380692806743875ca3b85d3dae581236504060fe550b370c15d50"
+      "sha256": "3563e0b61ac89184a34ef9a32eec348ccaac4abd89b58eb98ccfb45c4982fa40"
     },
     {
       "path": "13-default-effect-11-lofi.budsp",
@@ -79,7 +79,7 @@
     },
     {
       "path": "16-layered-bands-lofi-gate.budsp",
-      "sha256": "6b785cf7338219242668466ab808857d38b54bbdf2b860209a68222391aa77fd"
+      "sha256": "8e6a224615b6158748e15d360ab0c3cbde7da247238334620748c1baa366f9a6"
     },
     {
       "path": "17-deterministic-jitter-a.budsp",
@@ -103,7 +103,7 @@
     },
     {
       "path": "22-buffer-history-chain-position.budsp",
-      "sha256": "5d02139d8ae3bda9ebafee30e4ac5d7a7789a3ccc24d8c6b4445b0a1c770d4d5"
+      "sha256": "2ba08260c1eb8591ed0568eeb892fcfe5539d092dceeb3d7b13e67e8228a32af"
     },
     {
       "path": "pitch-actions.budsp",

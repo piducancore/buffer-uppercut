@@ -56,6 +56,30 @@ Slots are independent. A kit or host state may configure repeated instances of
 the same exact effect type, and every continuous instance has its own runtime
 processor state.
 
+### Performance-filter macros
+
+Low Band, Mid Band, and High Band are bounded nonlinear resonant state-variable
+filters. They retain effect values 8–10 and the existing seven normalized host
+macros:
+
+| Effect | Macros 1–7 |
+| --- | --- |
+| Low Band | Cutoff, Resonance, Drive, Envelope, Motion, Feedback, Wet |
+| Mid Band | Center, Width, Resonance, Drive, Envelope, Motion, Wet |
+| High Band | Cutoff, Resonance, Drive, Envelope, Motion, Feedback, Wet |
+
+Cutoff and center follow a logarithmic 20 Hz–20 kHz mapping and are clamped to
+`0.45 × sample_rate` during processing. Drive spans 0–30 dB. Envelope follows
+stereo peak level with a fast attack and slower release and raises the filter
+frequency by up to five octaves. Motion is a deterministic per-slot sine sweep
+from 0.08–8 Hz with up to a two-octave excursion. Resonance, feedback, and filter
+output are nonlinearly bounded. Mid derives bounded feedback from resonance.
+
+Filter integrators, envelope, motion phase, and feedback are independent per
+slot. They follow the standard processor lifecycle: suspension freezes them,
+release resets them, and activation or kit/state reset clears them. The detailed
+decision is recorded in [ADR 0005](adr/0005-nonlinear-performance-filter.md).
+
 ## Performance input and held state
 
 Direct computer keys, MIDI, automatable trigger parameters, and pointer presses

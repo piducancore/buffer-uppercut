@@ -13,6 +13,9 @@ This file tracks current product status. Architectural rationale belongs in
 - CLAP, VST3, and standalone targets build.
 - The framework-neutral `f64` DSP implements every current effect as an
   independent per-slot processor in a deterministic ascending-slot serial chain.
+- Low Band, Mid Band, and High Band use bounded nonlinear resonant state-variable
+  filters with drive, envelope response, deterministic motion, and saturated
+  feedback under the existing seven-macro slot schema.
 - At most six continuous processors are active. New requests suspend the oldest
   admitted processor, and still-held suspended requests restore
   most-recently-held first.
@@ -50,7 +53,10 @@ This file tracks current product status. Architectural rationale belongs in
   confirm disabled/unmapped keys remain available to the host.
 - Measure activation memory at supported sample rates and record controlled CPU
   baselines at active caps of one through six with visualization publishing
-  enabled.
+  enabled, including worst-case nonlinear filters.
+- Complete focused listening acceptance for the nonlinear Low/Mid/High filters,
+  including resonance, drive, envelope, motion, feedback, automation sweeps, and
+  six-stage serial stacking.
 - Run pluginval GUI tests in an interactive desktop session.
 - Add deterministic screenshot states for direct-key-held, MIDI-held, reverse,
   suspended, and disabled-macro views. Captured performance has a committed

@@ -22,3 +22,6 @@ Current records:
 - [0004 — Performance slots form a capped serial keyboard chain](0004-serial-performance-slots.md)
   governs the current serial DSP, admission, buffer-history, lifecycle, and
   direct-key architecture.
+- [0005 — Performance bands use a bounded nonlinear resonant filter](0005-nonlinear-performance-filter.md)
+  governs Low Band, Mid Band, and High Band topology, modulation, nonlinear
+  safety, macro semantics, and per-slot state.
