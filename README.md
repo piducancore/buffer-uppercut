@@ -1,5 +1,7 @@
 # Buffer Uppercut
 
+[![Built with Truce](https://truce.audio/branding/built-with-truce-dark.svg)](https://truce.audio/)
+
 Buffer Uppercut is a real-time buffer performance audio effect built in Rust
 with TRUCE 6.3 and a native Slint interface. This repository is the canonical
 product implementation.
