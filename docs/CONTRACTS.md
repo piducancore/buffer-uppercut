@@ -47,6 +47,7 @@ Effect type values are:
 | 9 | Mid Band |
 | 10 | High Band |
 | 11 | LoFi |
+| 12 | Vinyl |
 
 Macro parameters remain normalized for the host. The UI formats them
 semantically as grid divisions, percentages, semitones, decibels, milliseconds,
@@ -79,6 +80,49 @@ Filter integrators, envelope, motion phase, and feedback are independent per
 slot. They follow the standard processor lifecycle: suspension freezes them,
 release resets them, and activation or kit/state reset clears them. The detailed
 decision is recorded in [ADR 0005](adr/0005-nonlinear-performance-filter.md).
+
+### Vinyl macros
+
+Vinyl is an original record-wear simulation with seven normalized controls:
+
+| Macro | Behavior |
+| --- | --- |
+| Wow | Slow pitch drift; squared depth, up to 6 ms delay excursion |
+| Flutter | Faster pitch instability; squared depth, up to 0.35 ms excursion |
+| Wear | Blends toward a low-pass tone whose cutoff falls from 20 kHz to 1.8 kHz |
+| Drive | 0–18 dB into a blended, gain-compensated soft saturation |
+| Dust | Sparse bipolar clicks, up to 30 events/second per channel |
+| Noise | Colored surface noise; squared level response |
+| Wet | Local stage dry/effect blend |
+
+Wow combines 0.55 and 0.83 Hz oscillators; Flutter uses 8.7 Hz. Stereo channels
+share the same modulated delay position. The causal delay spans 0–12.7 ms at
+maximum depth and is part of the effect, not reported host latency. Wet mixes
+against undelayed stage input. During startup, delay is limited to the available
+samples. Vinyl does not use the eight-second capture history or captured view.
+
+Each slot prepares a separate 14 ms stereo `f64` delay plus four interpolation
+samples at activation. Its delay, oscillators, filter states, smoothed controls,
+and deterministic per-slot random sequence freeze during suspension. Release,
+type change, activation, kit reset, and host state restoration reset the
+processor; delay reset invalidates stored samples without clearing or resizing
+storage on the audio thread. Transport changes preserve state.
+
+Controls smooth over a 20 ms time constant after the initial configuration;
+values within `1e-9` of their target snap to it. Dust and Noise contributions
+are exactly silent at zero, including an existing dust tail. Wet zero and all
+six sound controls zero give exact dry output after smoothing settles. Surface
+texture can sound over silent input while the pad is active. The wet input is
+bounded to ±16; clean/dry endpoints preserve finite input unchanged.
+
+Defaults are 20% Wow, 15% Flutter, 30% Wear, 15% Drive (2.7 dB), 8% Dust, 8%
+Noise, and 100% Wet. **Vinyl Cuts**, the fifth factory kit, puts four Vinyl
+textures on its first four pads and retains the Classic tools on pads 5–16.
+
+The effect selector now has 13 choices. IDs and plain values 0–11 are unchanged,
+but normalized type values use `index / 12`; old normalized automation/state
+is not migrated. Kit v1's binary layout is unchanged and accepts effect values
+0–12. See [ADR 0006](adr/0006-vinyl-simulation.md).
 
 ## Performance input and held state
 
@@ -141,7 +185,7 @@ audible chain order is always ascending slot number.
 ## Serial processing and admission
 
 Continuous effects are Beat Repeat, Reverse, Tape Stop, Gate, Low Band, Mid Band,
-High Band, and LoFi. Off and the three pitch actions are not continuous stages.
+High Band, LoFi, and Vinyl. Off and the three pitch actions are not continuous stages.
 Pitch actions neither enter the audio chain nor consume admission capacity.
 
 Every admitted continuous slot is a distinct serial stage, including repeated
@@ -208,7 +252,8 @@ processor.
 
 `process` and its callees must perform no allocation, resizing, locking, logging,
 file access, blocking, or unbounded work. All wrapper scratch, the rolling
-history, and all 16 slot histories are allocated during `reset`.
+history, all 16 slot histories, and all 16 short Vinyl delays are allocated
+during `reset`.
 
 Audio output must be finite. Wrapper output flushes samples below the `f32`
 normal range to zero.

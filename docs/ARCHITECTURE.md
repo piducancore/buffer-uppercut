@@ -110,6 +110,16 @@ type clears that slot's history and begins cold because the engine cannot
 fabricate earlier chain-position input. Histories are allocated and cleared only
 through lifecycle/reset paths, never resized in `process`.
 
+## Vinyl processor
+
+`dsp/src/vinyl.rs` owns the Vinyl algorithm and short stereo `f64` delay.
+`dsp/src/lib.rs` owns its slot lifecycle and dispatch, and retains semantic
+control metadata. Storage is prepared for every slot at activation, so changing
+a slot to Vinyl never allocates. The delay is processor state: it freezes on
+suspension and is invalidated on reset without clearing the storage. It is
+separate from the continuously recorded capture histories. Macro and timing
+semantics live in the [Vinyl contract](CONTRACTS.md#vinyl-macros).
+
 ## Computer-key flow
 
 The performance layout follows physical key positions:

@@ -4,6 +4,8 @@
 //! Allocation is confined to [`Engine::reset`]; [`Engine::process`] only
 //! mutates already-prepared storage.
 
+mod vinyl;
+
 pub const NUM_PADS: usize = 16;
 pub const NUM_MACROS: usize = 7;
 pub const MAX_ACTIVE_PROCESSORS: usize = 6;
@@ -58,6 +60,7 @@ pub enum EffectType {
     BandMid = 9,
     BandHigh = 10,
     LoFi = 11,
+    Vinyl = 12,
 }
 
 impl EffectType {
@@ -75,6 +78,7 @@ impl EffectType {
             9 => Self::BandMid,
             10 => Self::BandHigh,
             11 => Self::LoFi,
+            12 => Self::Vinyl,
             _ => Self::Off,
         }
     }
@@ -97,6 +101,7 @@ impl EffectType {
             Self::PitchDown | Self::PitchReset | Self::PitchUp => 1,
             Self::BandLow | Self::BandMid | Self::BandHigh => NUM_MACROS,
             Self::LoFi => 3,
+            Self::Vinyl => NUM_MACROS,
             Self::BeatRepeat | Self::Reverse | Self::TapeStop => NUM_MACROS,
         }
     }
@@ -143,6 +148,7 @@ impl EffectType {
                 "WET",
             ][control],
             Self::LoFi => ["RATE", "BITS", "WET", "", "", "", ""][control],
+            Self::Vinyl => ["WOW", "FLUTTER", "WEAR", "DRIVE", "DUST", "NOISE", "WET"][control],
         }
     }
 }
@@ -354,6 +360,10 @@ pub fn format_control_value(effect_type: EffectType, control: usize, normalized:
             1 | 2 | 4 | 5 | 6 => percent(normalized),
             _ => format!("{:.1} dB", denormalize_linear(normalized, 0.0, 30.0)),
         },
+        EffectType::Vinyl => match control {
+            3 => format!("{:.1} dB", normalized * 18.0),
+            _ => percent(normalized),
+        },
         EffectType::LoFi => match control {
             0 => format!("{:.0} Hz", denormalize_linear(normalized, 1000.0, 44100.0)),
             1 => format!(
@@ -476,6 +486,9 @@ pub fn default_pad_config(effect_type: EffectType) -> PadConfig {
                 0.0,
                 0.0,
             ];
+        }
+        EffectType::Vinyl => {
+            config.macros = [0.2, 0.15, 0.3, 0.15, 0.08, 0.08, 1.0];
         }
         EffectType::Off => {}
     }
@@ -625,6 +638,7 @@ struct SlotRuntime {
     admission_order: u64,
     processor_ready: bool,
     buffer: BufferState,
+    vinyl: vinyl::Vinyl,
     filter_a: [f64; 2],
     filter_b: [f64; 2],
     filter_envelope: f64,
@@ -647,6 +661,7 @@ impl SlotRuntime {
             admission_order: 0,
             processor_ready: false,
             buffer: BufferState::new(slot),
+            vinyl: vinyl::Vinyl::new(slot),
             filter_a: [0.0; 2],
             filter_b: [0.0; 2],
             filter_envelope: 0.0,
@@ -661,6 +676,7 @@ impl SlotRuntime {
 
     fn reset_processor(&mut self) {
         self.buffer.reset_capture();
+        self.vinyl.reset();
         self.filter_a = [0.0; 2];
         self.filter_b = [0.0; 2];
         self.filter_envelope = 0.0;
@@ -735,6 +751,7 @@ impl Engine {
         self.rolling_r.resize(length, 0.0);
         for slot in &mut self.slots {
             slot.buffer.prepare(length);
+            slot.vinyl.prepare(self.sample_rate);
         }
         self.clear_transient();
     }
@@ -773,6 +790,11 @@ impl Engine {
         };
         let samples_per_beat = self.sample_rate * 60.0 / tempo;
         self.resolve_slots(state, samples_per_beat);
+        for (slot, config) in self.slots.iter_mut().zip(state.pads) {
+            if slot.active && config.effect_type == EffectType::Vinyl {
+                slot.vinyl.configure(config.macros);
+            }
+        }
 
         for sample in 0..frames {
             let input = [
@@ -828,6 +850,7 @@ impl Engine {
             } else {
                 self.slots[slot_index].buffer.reset_capture();
             }
+            self.slots[slot_index].vinyl.reset();
             self.slots[slot_index].filter_a = [0.0; 2];
             self.slots[slot_index].filter_b = [0.0; 2];
             self.slots[slot_index].filter_envelope = 0.0;
@@ -982,6 +1005,7 @@ impl Engine {
                 Self::apply_band(slot, stage_input, config, sample_rate)
             }
             EffectType::LoFi => Self::apply_lofi(slot, stage_input, config, sample_rate),
+            EffectType::Vinyl => slot.vinyl.process(stage_input),
             _ => stage_input,
         }
     }
@@ -1607,6 +1631,11 @@ mod tests {
                 ],
             ),
             (EffectType::LoFi, 3, ["RATE", "BITS", "WET", "", "", "", ""]),
+            (
+                EffectType::Vinyl,
+                7,
+                ["WOW", "FLUTTER", "WEAR", "DRIVE", "DUST", "NOISE", "WET"],
+            ),
         ];
 
         for (effect, active_count, names) in expected {

@@ -367,6 +367,68 @@ mod tests {
     }
 
     #[test]
+    fn vinyl_wrapper_lifecycle_is_allocation_free() {
+        let params = BufferUppercutParams::default();
+        let kit = buffer_uppercut_kit::vinyl_cuts_kit();
+        for pad in 0..7 {
+            params.set_plain(params::pad_type_id(pad), EffectType::Vinyl as u8 as f64);
+            for control in 0..7 {
+                params.set_plain(
+                    params::pad_control_id(pad, control),
+                    kit.state.pads[0].macros[control],
+                );
+            }
+        }
+        let mut state = BufferUppercut::default();
+        <BufferUppercut as PluginLogic>::reset(&mut state, &params, &AudioConfig::new(8000.0, 64));
+        let input = [0.3; 64];
+        let mut left = [0.0; 64];
+        let mut right = [0.0; 64];
+        let events = EventList::with_capacity(0);
+        let transport = TransportInfo::for_screenshot();
+        let mut output_events = EventList::with_capacity(0);
+        for phase in 0..8 {
+            for pad in 0..7 {
+                params.set_plain(
+                    params::pad_trigger_id(pad),
+                    if pad < 6 || phase == 1 { 1.0 } else { 0.0 },
+                );
+            }
+            if phase == 3 {
+                params.request_kit_reset();
+            }
+            if phase == 4 {
+                params.set_plain(params::pad_type_id(0), EffectType::Gate as u8 as f64);
+            }
+            if phase == 5 {
+                params.set_plain(params::pad_type_id(0), EffectType::Vinyl as u8 as f64);
+            }
+            for control in 0..7 {
+                params.set_plain(
+                    params::pad_control_id(0, control),
+                    if phase % 2 == 0 { 1.0 } else { 0.0 },
+                );
+            }
+            let inputs = [&input[..], &input[..]];
+            let mut outputs = [&mut left[..], &mut right[..]];
+            let mut buffer = AudioBuffer::from_slices_checked(&inputs, &mut outputs, 64);
+            let mut context = ProcessContext::new(&transport, 8000.0, 64, &mut output_events);
+            let (_, violations) = truce::core::rt::audit(|| {
+                let _section = truce::core::rt::RtSection::enter();
+                <BufferUppercut as PluginLogic>::process(
+                    &mut state,
+                    &params,
+                    &mut buffer,
+                    &events,
+                    &mut context,
+                );
+            });
+            assert_eq!(violations, 0, "phase {phase}");
+            assert!(left.iter().chain(&right).all(|sample| sample.is_finite()));
+        }
+    }
+
+    #[test]
     fn wrapper_publishes_active_and_suspended_slot_masks() {
         let params = BufferUppercutParams::default();
         for pad in 0..7 {

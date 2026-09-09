@@ -79,6 +79,57 @@ baseline exercises fixed layout geometry, capture emphasis, and held-slot
 hierarchy. Additional state baselines for direct-key-held, MIDI-held, reverse,
 suspended, and disabled-macro states remain roadmap work.
 
+A Vinyl preview exercises all seven macro labels and the final selector choice:
+
+```sh
+BUFFER_UPPERCUT_EDITOR_PREVIEW=vinyl cargo truce screenshot --out screenshots/slint-vinyl.png --check --debug --scale 1
+```
+
+## Focused Vinyl acceptance
+
+Automated DSP tests cover audible pitch movement, stereo timing, wear response,
+saturation harmonics, deterministic independent texture, exact clean endpoints,
+block partitioning, duplicate serial stages, suspension/restore, reset, and
+sample-rate/automation extremes. The wrapper lifecycle test explicitly enters
+an `rt-paranoid` section around processing, including six Vinyl stages,
+overflow, type changes, and kit reset. Kit tests cover Vinyl round-trip and
+rejection of effect values above 12.
+
+In both CLAP and VST3 in REAPER:
+
+- Load Vinyl Cuts and audition its first four pads on drums and sustained tones.
+- Sweep all seven macros; check for objectionable transitions and excessive gain.
+- Turn Dust and Noise off; confirm silence over silent input and no click tail.
+- Set Wet to zero, then all sound controls to zero; confirm clean output after
+  smoothing settles. Compare mono and stereo sources.
+- Stack duplicate Vinyl pads and six active stages; suspend/restore a seventh.
+- Record type/macro automation, save and reopen the project, and check recall.
+- Release/repress and change effect type; confirm no stale delayed audio returns.
+- Change sample rate, tempo, buffer size, and transport position; check the
+  lifecycle rules in `CONTRACTS.md`. Record CPU and perform listening acceptance.
+
+## Vinyl verification evidence (2026-09-09)
+
+- Formatting, all-target/all-feature Clippy, workspace tests, `rt-paranoid`, and
+  CLAP/VST3 release builds pass. Both frozen corpus checksum sets pass.
+- All five screenshot baselines pass, including Vinyl with all seven controls.
+  Existing images changed only at the selector knob to reflect thirteen choices.
+- CLAP validator: 42 passed, zero failures/warnings, two skipped.
+- REAPER 7.78 on macOS 26.5.2: both new bundles were loaded from the build
+  directory in an isolated resource profile. Both expose Vinyl, open their native
+  editor, load Vinyl Cuts through the factory arrows, and recall the type and
+  all seven macro values after project reload.
+- Scripted CLAP writes immediately followed by editor creation were superseded
+  before application. Separating parameter application from editor creation
+  passes both pre-save checks and reload checks; this combined host sequence
+  remains an investigation item in ROADMAP.md.
+- Preliminary optimized DSP-only timing with 256-frame blocks: one/six maximum
+  Vinyl stages used 0.50%/3.42% of one core at 48 kHz and 3.32%/12.42% at 192 kHz.
+  These measurements ran alongside other work and exclude wrapper/visualization
+  costs; they are not controlled release CPU acceptance.
+- Listening, recorded DAW automation, mono/stereo source acceptance, and the full
+  six-stage host performance checklist remain release work.
+
 ## Validators
 
 Build release bundles first:
@@ -111,7 +162,7 @@ Quit and reopen REAPER after installing a new build.
 
 - Dry audio passes unchanged with no slot held.
 - Exercise repeat, reverse, tape stop, gate, all pitch actions, three bands, and
-  LoFi.
+  LoFi and Vinyl.
 - Hold two gates, two bands, two LoFi stages, and two buffer stages in separate
   trials. Confirm repeated exact types stack instead of replacing one another.
 - Press the same configured slots in different orders. Confirm audible stage

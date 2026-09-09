@@ -12,14 +12,14 @@ It provides:
   60–75, plus an opt-in physical computer-key layout in plugins and a
   default-on layout in standalone;
 - beat repeat, reverse, tape stop, gate, pitch actions, low/mid/high bands,
-  and LoFi effects;
+  LoFi, and Vinyl record-wear effects;
 - deterministic serial stacking in ascending slot order, including repeated
   instances of the same effect, with a six-processor admission cap;
 - an effect-type knob plus seven effect-aware macro knobs per pad, with semantic
   labels and values;
 - independent eight-second stereo `f32` histories for configured buffer slots,
   `f64` signal processing, and a stereo history/captured-slice waveform;
-- four factory kits, host-native preset recall, and a versioned `.bupreset`
+- five factory kits, host-native preset recall, and a versioned `.bupreset`
   codec;
 - host tempo, automation, state recall, MIDI illumination, and MIDI
   auto-selection;
@@ -29,6 +29,11 @@ It provides:
 
 Earlier C++ and WRAC implementations were experiments. They are not supported
 state, preset, product-ID, or source-compatibility targets.
+
+Select **Vinyl** with a pad’s effect-type knob, or load **Vinyl Cuts** from the
+factory-kit arrows for four ready-to-play textures. Its seven controls are Wow,
+Flutter, Wear, Drive, Dust, Noise, and Wet. See the
+[Vinyl contract](docs/CONTRACTS.md#vinyl-macros) for their behavior.
 
 ## Quick start
 

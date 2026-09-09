@@ -154,6 +154,7 @@ pub enum EffectType {
     #[name = "High Band"]
     HighBand,
     LoFi,
+    Vinyl,
 }
 
 macro_rules! pad_params {
@@ -863,6 +864,19 @@ mod tests {
         assert_eq!(snapshot.bins, bins);
         assert_eq!(snapshot.meta, meta);
         assert!(!params.waveform_snapshot(&mut snapshot));
+        assert_eq!(params.count(), 145);
+    }
+
+    #[test]
+    fn vinyl_is_the_thirteenth_host_choice_on_every_slot() {
+        let params = BufferUppercutParams::default();
+        for pad in 0..NUM_PADS {
+            let id = pad_type_id(pad);
+            for effect in 0..=12 {
+                params.set_normalized(id, effect as f64 / 12.0);
+                assert_eq!(params.get_plain(id), Some(effect as f64));
+            }
+        }
         assert_eq!(params.count(), 145);
     }
 

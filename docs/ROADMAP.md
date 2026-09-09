@@ -1,11 +1,15 @@
 # Roadmap
 
-Last updated: 2026-08-16.
+Last updated: 2026-09-09.
 
 This file tracks current product status. Architectural rationale belongs in
 `adr/`; durable behavior belongs in `CONTRACTS.md`.
 
 ## Current baseline
+
+- Vinyl is effect type 12 with independent wow/flutter delay, wear, drive, dust,
+  noise, and wet mix. The fifth factory kit, Vinyl Cuts, provides four textures.
+  The selector has 13 choices; the 145 IDs and kit v1 layout remain unchanged.
 
 - TRUCE 6.3 is the sole canonical framework.
 - Slint 1.15.1 is the sole editor implementation.
@@ -34,8 +38,8 @@ This file tracks current product status. Architectural rationale belongs in
   `dsp-contract-v2-serial` owns the canonical serial outputs and new serial,
   cap, history, and chain-position scenarios.
 - Processing is allocation-free after activation according to `rt-paranoid`.
-- Three deterministic size baselines plus the captured-state baseline exist for
-  the Slint editor.
+- Three deterministic size baselines plus captured-state and Vinyl baselines
+  exist for the Slint editor.
 - The current serial build loads in macOS REAPER; MIDI and focused direct-key
   performance have been confirmed in the installed plugin.
 - Linux, Windows, and macOS CI cover formatting, Clippy, contract tests,
@@ -44,6 +48,13 @@ This file tracks current product status. Architectural rationale belongs in
   out of scope.
 
 ## Next: serial release sign-off
+
+- Finish Vinyl listening and recorded-automation acceptance, mono/stereo source
+  checks, and six-stage host CPU measurements in `TESTING.md`. CLAP/VST3 selector,
+  native-editor opening, and project recall of all seven macros pass in REAPER.
+- Investigate the CLAP host edge case where scripted parameter writes immediately
+  followed by editor creation can be superseded before the host applies them.
+  Applied parameters recall correctly after the host processes its queue.
 
 - Complete the full REAPER checklist for serial stacking, same-type stages,
   six-stage suspend/restore, release/repress history, and final **Buffer

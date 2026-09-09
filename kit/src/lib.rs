@@ -9,7 +9,7 @@ use buffer_uppercut_dsp::{
 };
 
 pub const KIT_VERSION: u32 = 1;
-pub const FACTORY_KIT_COUNT: usize = 4;
+pub const FACTORY_KIT_COUNT: usize = 5;
 pub const MAX_KIT_NAME_BYTES: usize = 63;
 pub const MAX_KIT_FILE_BYTES: usize = 4096;
 pub const KIT_EXTENSION: &str = "bupreset";
@@ -129,7 +129,7 @@ pub fn decode(bytes: &[u8]) -> Result<Kit, DecodeError> {
     };
     for pad in &mut state.pads {
         let effect = get_u32(bytes, &mut cursor).ok_or(DecodeError::InvalidEffect)?;
-        if effect > EffectType::LoFi as u32 {
+        if effect > EffectType::Vinyl as u32 {
             return Err(DecodeError::InvalidEffect);
         }
         pad.effect_type = EffectType::from_index(effect as i32);
@@ -161,8 +161,23 @@ pub fn factory_kit(index: usize) -> Kit {
         1 => glitch_grid_kit(),
         2 => tape_lab_kit(),
         3 => filter_pitch_kit(),
+        4 => vinyl_cuts_kit(),
         _ => classic_kit(),
     }
+}
+
+/// Four record textures followed by the classic performance tools.
+#[must_use]
+pub fn vinyl_cuts_kit() -> Kit {
+    let mut kit = classic_kit();
+    kit.name = "Vinyl Cuts".to_owned();
+    for pad in &mut kit.state.pads[..4] {
+        *pad = default_pad_config(EffectType::Vinyl);
+    }
+    kit.state.pads[1].macros = [0.75, 0.4, 0.2, 0.1, 0.0, 0.0, 1.0];
+    kit.state.pads[2].macros = [0.1, 0.1, 0.45, 0.2, 0.65, 0.3, 1.0];
+    kit.state.pads[3].macros = [0.5, 0.65, 0.85, 0.65, 0.35, 0.2, 1.0];
+    kit
 }
 
 #[must_use]
@@ -386,6 +401,18 @@ mod tests {
         assert_eq!(decoded.state.pads[0].macros[0], 0.125);
         assert_eq!(decoded.state.pads[1].macros[0], 0.875);
         assert!(!decoded.state.held.iter().any(|held| *held));
+    }
+
+    #[test]
+    fn vinyl_kit_round_trips_and_unknown_effects_are_rejected() {
+        let kit = vinyl_cuts_kit();
+        let mut bytes = encode(&kit);
+        let decoded = decode(&bytes).unwrap();
+        assert_eq!(decoded.state.pads[0].effect_type, EffectType::Vinyl);
+        assert_eq!(decoded.state.pads[3].macros, kit.state.pads[3].macros);
+        let first_effect = 24 + kit.name.len() + 8;
+        bytes[first_effect..first_effect + 4].copy_from_slice(&13_u32.to_le_bytes());
+        assert!(matches!(decode(&bytes), Err(DecodeError::InvalidEffect)));
     }
 
     #[test]

@@ -18,7 +18,7 @@ use crate::params::{
 
 include_modules!();
 
-const EFFECT_COUNT: usize = 12;
+const EFFECT_COUNT: usize = EffectType::Vinyl as usize + 1;
 const DEFAULT_EDITOR_SIZE: (u32, u32) = (1120, 700);
 const WAVEFORM_VIEWBOX_WIDTH: f32 = 1000.0;
 const WAVEFORM_VIEWBOX_HEIGHT: f32 = 32.0;
@@ -28,6 +28,7 @@ const WAVEFORM_AMPLITUDE: f32 = 14.0;
 enum EditorPreview {
     Captured,
     Pitch,
+    Vinyl,
 }
 
 impl EditorPreview {
@@ -35,6 +36,7 @@ impl EditorPreview {
         match self {
             Self::Captured => 1,
             Self::Pitch => 9,
+            Self::Vinyl => 0,
         }
     }
 
@@ -42,6 +44,7 @@ impl EditorPreview {
         match self {
             Self::Captured => Some(1),
             Self::Pitch => None,
+            Self::Vinyl => Some(0),
         }
     }
 }
@@ -56,8 +59,29 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         let selected_pad = Rc::new(Cell::new(
             editor_preview.map_or(0, EditorPreview::selected_pad),
         ));
+        if editor_preview == Some(EditorPreview::Vinyl) {
+            // Headless screenshots do not run the host automation queue.
+            let kit = buffer_uppercut_kit::vinyl_cuts_kit();
+            for (pad, config) in kit.state.pads.iter().enumerate() {
+                state
+                    .params()
+                    .set_plain(pad_type_id(pad), config.effect_type as u8 as f64);
+                for (control, value) in config.macros.iter().enumerate() {
+                    state
+                        .params()
+                        .set_plain(pad_control_id(pad, control), *value);
+                }
+            }
+            state.params().set_kit_name(&kit.name);
+        }
         let auto_select_midi = Rc::new(Cell::new(true));
-        let factory_kit_index = Rc::new(Cell::new(Some(0_usize)));
+        let factory_kit_index = Rc::new(Cell::new(Some(
+            if editor_preview == Some(EditorPreview::Vinyl) {
+                4_usize
+            } else {
+                0
+            },
+        )));
         let last_midi_press_sequence = Rc::new(Cell::new(state.params().midi_pad_press_event().0));
         let last_direct_key_press_sequence =
             Rc::new(Cell::new(state.params().direct_key_press_event().0));
@@ -385,6 +409,7 @@ fn parse_editor_preview(value: &str) -> Option<EditorPreview> {
     match value {
         "captured" => Some(EditorPreview::Captured),
         "pitch" => Some(EditorPreview::Pitch),
+        "vinyl" => Some(EditorPreview::Vinyl),
         _ => None,
     }
 }
@@ -392,7 +417,7 @@ fn parse_editor_preview(value: &str) -> Option<EditorPreview> {
 fn apply_editor_preview(ui: &BufferUppercutUi, preview: Option<EditorPreview>) {
     match preview {
         Some(EditorPreview::Captured) => apply_captured_editor_preview(ui),
-        Some(EditorPreview::Pitch) | None => {}
+        Some(EditorPreview::Pitch | EditorPreview::Vinyl) | None => {}
     }
 }
 
@@ -504,6 +529,7 @@ fn effect_name(effect: EffectType) -> &'static str {
         EffectType::BandMid => "Mid Band",
         EffectType::BandHigh => "High Band",
         EffectType::LoFi => "LoFi",
+        EffectType::Vinyl => "Vinyl",
     }
 }
 
@@ -521,6 +547,7 @@ fn effect_abbreviation(effect: EffectType) -> &'static str {
         EffectType::BandMid => "MID",
         EffectType::BandHigh => "HI",
         EffectType::LoFi => "LOFI",
+        EffectType::Vinyl => "VINYL",
     }
 }
 

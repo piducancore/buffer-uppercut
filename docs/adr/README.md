@@ -25,3 +25,5 @@ Current records:
 - [0005 — Performance bands use a bounded nonlinear resonant filter](0005-nonlinear-performance-filter.md)
   governs Low Band, Mid Band, and High Band topology, modulation, nonlinear
   safety, macro semantics, and per-slot state.
+- [0006 — Vinyl is an independent record-wear effect](0006-vinyl-simulation.md)
+  governs the thirteenth effect choice, macro semantics, short delay, and kit extension.
