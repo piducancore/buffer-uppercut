@@ -1,6 +1,6 @@
 # Buffer Uppercut DSP regression corpora
 
-This directory contains two deliberately separated contract versions.
+This directory contains four deliberately separated contract versions.
 
 ## V1: frozen seed evidence
 
@@ -15,7 +15,7 @@ intentionally changes some outputs, so the canonical Rust engine is not required
 to match v1 audio. Never rewrite root v1 fixtures or their checksums to make a
 new architecture pass.
 
-## V2: canonical serial expectations
+## V2: frozen serial expectations
 
 [`v2/`](v2/) contains `dsp-contract-v2-serial`, the canonical regression corpus
 for ADR 0004. It keeps the broad v1 input scenarios with serial-engine outputs
@@ -28,11 +28,23 @@ Each corpus owns its own manifest and checksum list:
 ```sh
 (cd contract && shasum -a 256 -c SHA256SUMS)
 (cd contract/v2 && shasum -a 256 -c SHA256SUMS)
+(cd contract/v3 && shasum -a 256 -c SHA256SUMS)
+(cd contract/v4 && shasum -a 256 -c SHA256SUMS)
 cargo test -p buffer-uppercut-dsp --test contract
 ```
 
-The DSP contract harness executes v2 as the current sound contract. V1 integrity
-is checksum-only evidence unless an explicit legacy comparison tool is run.
+## V3: frozen unified Filter expectations
+
+[`v3/`](v3/) contains `dsp-contract-v3-unified-filter`. It migrates the v2
+inputs to one Filter effect with Low-pass, Band-pass, and High-pass modes and
+captures the Rust engine output for that milestone.
+
+## V4: current held grain Pitch expectations
+
+[`v4/`](v4/) contains `dsp-contract-v4-grain-pitch`. It consolidates Pitch into
+Down, Trigger, and Up roles, includes the tempo-preserving grain processor, and
+renumbers Filter, LoFi, and Vinyl. The DSP contract harness executes v4; V1–V3
+remain checksum-only evidence.
 
 ## Fixture format
 
@@ -52,8 +64,8 @@ values. Implementations must produce finite samples within:
 abs(actual - expected) <= 1e-7 + 1e-7 * abs(expected)
 ```
 
-`pitch-actions.budsp` separately contracts wrapper-triggered pitch-down,
-pitch-reset, and pitch-up operations.
+`pitch-actions.budsp` separately contracts role-driven Down and Up step
+operations, including Trigger's no-op action behavior.
 
 See [`DEVIATIONS.md`](DEVIATIONS.md) for the approved v1-to-v2 change and
 [`../docs/TESTING.md`](../docs/TESTING.md) for acceptance procedures.

@@ -25,20 +25,22 @@ cargo truce build --clap --vst3
 
 ### Regression-corpus integrity
 
-V1 is frozen historical evidence. V2 is the canonical serial expectation:
+V1–V3 are frozen historical evidence. V4 is the current expectation:
 
 ```sh
 (cd contract && shasum -a 256 -c SHA256SUMS)
 (cd contract/v2 && shasum -a 256 -c SHA256SUMS)
+(cd contract/v3 && shasum -a 256 -c SHA256SUMS)
+(cd contract/v4 && shasum -a 256 -c SHA256SUMS)
 cargo test -p buffer-uppercut-dsp --test contract
 ```
 
-The contract harness must execute `contract/v2/*.budsp`. It must not make the
+The contract harness must execute `contract/v4/*.budsp`. It must not make the
 intentional serial architecture pass by rewriting or silently blessing
-`contract/*.budsp`. V1 integrity is checked by its original checksum list.
+earlier corpora. V1–V3 integrity is checked by their checksum lists.
 
-The v2 fixture set includes the retained broad processing scenarios plus focused
-coverage for:
+The v4 fixture set retains the broad processing and serial scenarios, migrates
+the held grain Pitch schema, and includes focused coverage for:
 
 - two same-type stages stacking serially;
 - the six-stage cap, oldest-active suspension, and most-recently-held restore;
@@ -46,6 +48,45 @@ coverage for:
   suspension;
 - release resetting processor state while configured history continues; and
 - buffer lookback captured at the slot's own serial chain position.
+
+## Focused Pitch acceptance
+
+Automated tests cover role quantization, configured action steps and clamping,
+Trigger admission, action-role exclusion, exact dry output at zero shift,
+finite shifted output, expected octave direction, wrapper edge handling, and
+reset to zero when the final Trigger releases. The v4 corpus also verifies that
+Beat Repeat Slice Pitch is independent of Active Shift.
+
+In both CLAP and VST3 in REAPER:
+
+- Hold the Classic D Trigger and tap S/F repeatedly. Confirm each new press
+  moves by the action pad's Step and holding a key does not retrigger.
+- Release D and confirm Active Shift immediately returns to zero and the dry
+  timing resumes. Repeat with two Trigger pads and confirm only the final release
+  resets it.
+- Change Step on Down and Up independently and verify their increments.
+- Sweep Grain, Texture, Smooth, Feedback, and Wet on a sustained tone and drums;
+  confirm tempo and event length remain stable across positive and negative
+  shifts.
+- Confirm action roles never suspend a continuous stage, while multiple Trigger
+  roles stack as distinct serial processors under the six-stage cap.
+- Automate roles and all macros, save/reopen, and verify exact recall. Confirm
+  Beat Repeat Slice Pitch remains local when Active Shift changes.
+
+## Pitch verification evidence (2026-09-09)
+
+- Formatting, all-target/all-feature Clippy, workspace tests, `rt-paranoid`, the
+  v1–v4 checksum sets, and CLAP/VST3 release builds pass.
+- The installed bundle executables match the release-build hashes. CLAP
+  Validator reports 42 passed, zero failures or warnings, and two skipped.
+- All five screenshot baselines pass. The Classic view shows S/D/F as Pitch −,
+  Pitch, and Pitch +, a read-only Active Shift indicator, and the distinct yellow
+  type control labeled **TYPE RESETS**.
+- REAPER 7.78 loads the installed VST3 and opens its native editor. Reloading
+  Classic exposes the three Pitch roles; the Trigger reports Step 1 st, Grain
+  48 ms, Texture 20%, Smooth 18 ms, Feedback 0%, and Wet 100%.
+- Live listening, multi-Trigger interaction, recorded automation, and project
+  recall for the new Pitch roles remain on the release checklist above.
 
 ## Focused serial checks
 
@@ -93,7 +134,7 @@ block partitioning, duplicate serial stages, suspension/restore, reset, and
 sample-rate/automation extremes. The wrapper lifecycle test explicitly enters
 an `rt-paranoid` section around processing, including six Vinyl stages,
 overflow, type changes, and kit reset. Kit tests cover Vinyl round-trip and
-rejection of effect values above 12.
+rejection of effect values above 8.
 
 In both CLAP and VST3 in REAPER:
 
@@ -113,7 +154,8 @@ In both CLAP and VST3 in REAPER:
 - Formatting, all-target/all-feature Clippy, workspace tests, `rt-paranoid`, and
   CLAP/VST3 release builds pass. Both frozen corpus checksum sets pass.
 - All five screenshot baselines pass, including Vinyl with all seven controls.
-  Existing images changed only at the selector knob to reflect thirteen choices.
+  Existing images changed only at the selector knob to reflect the then-current
+  choices.
 - CLAP validator: 42 passed, zero failures/warnings, two skipped.
 - REAPER 7.78 on macOS 26.5.2: both new bundles were loaded from the build
   directory in an isolated resource profile. Both expose Vinyl, open their native
@@ -147,6 +189,38 @@ release. Headless CI may use `--skip-gui-tests`.
 
 Quit and reopen REAPER after installing a new build.
 
+### Effect defaults and knob synchronization
+
+- On a fresh instance, trigger LP, BP, and HP with direct keys and confirm each
+  changes the audio at 100% Wet. Loading Classic must retain these defaults.
+- Drag Wet on one pad, select another pad, and confirm the dial and numeric value
+  agree. The next drag must start at the selected pad's value without jumping.
+- Repeat after editing the type knob and performance pitch, and after preset
+  recall with the editor open.
+- Change Beat Repeat to Reverse, Filter, and Vinyl. Confirm all seven macros
+  receive the new defaults, the held pad remains usable, and repeated pointer
+  motion within one discrete type does not reload defaults.
+- On Filter, sweep Mode and confirm it snaps to Low-pass, Band-pass, and
+  High-pass while the other six control meanings stay fixed.
+- Record the type gesture in the host, verify the type and seven macro lanes,
+  and confirm all touched gestures end on release. Reopen the project and check
+  exact recall of customized settings.
+
+Verification evidence (2026-09-09): formatting, Clippy, workspace tests,
+`rt-paranoid`, CLAP/VST3 builds, and all five screenshot checks pass. The
+headless pointer regression reproduces the stale drag origin before the binding
+fix and passes afterward. Every fresh host control matches the Classic kit.
+Installed bundle hashes match the corresponding release builds.
+
+In an isolated REAPER 7.78 session, both VST3 and CLAP expose pads 13–15 as the
+same Filter type with LP/BP/HP Mode values, true 100% Wet defaults, and Vinyl as
+the final selector choice. Both native editors open. Saving and reopening the
+project recalls a changed HP Mode, Frequency, and Wet value in both formats.
+Earlier live VST3 interaction also verified that changing pads through the same
+Wet widget starts from each pad's current value and that editor type selection
+loads all seven defaults. Recorded compound automation and listening acceptance
+remain on the checklist.
+
 ### Discovery and lifecycle
 
 - VST3 and CLAP appear as **Buffer Uppercut**.
@@ -161,9 +235,9 @@ Quit and reopen REAPER after installing a new build.
 ### Audio and serial performance
 
 - Dry audio passes unchanged with no slot held.
-- Exercise repeat, reverse, tape stop, gate, all pitch actions, three bands, and
-  LoFi and Vinyl.
-- Hold two gates, two bands, two LoFi stages, and two buffer stages in separate
+- Exercise repeat, reverse, tape stop, gate, Pitch Trigger with Down/Up actions,
+  all three Filter modes, LoFi, and Vinyl.
+- Hold two gates, two Filters, two LoFi stages, and two buffer stages in separate
   trials. Confirm repeated exact types stack instead of replacing one another.
 - Press the same configured slots in different orders. Confirm audible stage
   order remains ascending slot number.
@@ -196,7 +270,8 @@ Quit and reopen REAPER after installing a new build.
 3. Verify key release ends only the direct-key hold when MIDI, automation, or
    pointer still holds the same slot.
 4. Verify repeated key-down events do not create stuck or duplicate releases.
-5. Verify pitch-action slots fire once per aggregate released-to-held edge.
+5. Hold a Pitch Trigger and verify Down/Up slots fire once per aggregate
+   released-to-held edge; release the final Trigger and verify reset to zero.
 6. Test one non-US keyboard layout and confirm the physical positions do not
    move with produced characters.
 7. In standalone, verify direct keys are enabled by default.
@@ -254,7 +329,8 @@ cargo run --locked -p buffer-uppercut-dsp --release --example benchmark
 Use at least five like-for-like runs for active caps one through six. A repeatable
 audio-callback regression above 10% blocks sign-off unless explicitly accepted.
 Record activation memory at common sample rates, including the next-power-of-two
-cost of 16 stereo eight-second `f32` histories plus rolling history.
+cost of 16 stereo eight-second `f32` histories, 16 bounded grain Pitch delays,
+16 Vinyl delays, and rolling history.
 
 ## Definition of done
 
@@ -263,7 +339,7 @@ A feature is complete when:
 - focused tests cover its behavior and failure cases;
 - workspace, Clippy, formatting, and `rt-paranoid` pass;
 - advertised formats build;
-- both corpus checksum sets pass and the canonical v2 harness passes;
+- all corpus checksum sets pass and the canonical v4 harness passes;
 - screenshots or DAW checks cover visible/host-facing changes;
 - authoritative contracts, architecture, roadmap, and ADRs are updated;
 - no build products, installed bundles, or caches are committed.

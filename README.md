@@ -11,8 +11,8 @@ It provides:
 - 16 momentary performance pads driven by the UI, automation, or MIDI notes
   60–75, plus an opt-in physical computer-key layout in plugins and a
   default-on layout in standalone;
-- beat repeat, reverse, tape stop, gate, pitch actions, low/mid/high bands,
-  LoFi, and Vinyl record-wear effects;
+- beat repeat, reverse, tape stop, gate, a held grain Pitch with Down/Up action
+  roles, a multimode Filter, LoFi, and Vinyl record-wear effects;
 - deterministic serial stacking in ascending slot order, including repeated
   instances of the same effect, with a six-processor admission cap;
 - an effect-type knob plus seven effect-aware macro knobs per pad, with semantic
@@ -34,6 +34,10 @@ Select **Vinyl** with a pad’s effect-type knob, or load **Vinyl Cuts** from th
 factory-kit arrows for four ready-to-play textures. Its seven controls are Wow,
 Flutter, Wear, Drive, Dust, Noise, and Wet. See the
 [Vinyl contract](docs/CONTRACTS.md#vinyl-macros) for their behavior.
+
+In the Classic kit, hold **D** to engage grain Pitch, then tap **S** or **F** to
+move down or up by the configured Step. Each new tap accumulates while D remains
+held; releasing D returns Active Shift to zero.
 
 ## Quick start
 
@@ -76,6 +80,8 @@ cargo test --locked --workspace --features rt-paranoid
 cargo truce build --clap --vst3
 (cd contract && shasum -a 256 -c SHA256SUMS)
 (cd contract/v2 && shasum -a 256 -c SHA256SUMS)
+(cd contract/v3 && shasum -a 256 -c SHA256SUMS)
+(cd contract/v4 && shasum -a 256 -c SHA256SUMS)
 ```
 
 Render or check the Slint editor:

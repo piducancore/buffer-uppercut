@@ -7,9 +7,12 @@ This file tracks current product status. Architectural rationale belongs in
 
 ## Current baseline
 
-- Vinyl is effect type 12 with independent wow/flutter delay, wear, drive, dust,
+- Pitch is one effect with Down, Trigger, and Up roles. A held Trigger runs a
+  tempo-preserving grain shifter; action taps accumulate their configured Step
+  until the final Trigger releases. Beat Repeat keeps independent Slice Pitch.
+- Vinyl is effect type 8 with independent wow/flutter delay, wear, drive, dust,
   noise, and wet mix. The fifth factory kit, Vinyl Cuts, provides four textures.
-  The selector has 13 choices; the 145 IDs and kit v1 layout remain unchanged.
+  The selector has nine choices; the 145 IDs and kit v1 layout remain unchanged.
 
 - TRUCE 6.3 is the sole canonical framework.
 - Slint 1.15.1 is the sole editor implementation.
@@ -17,9 +20,9 @@ This file tracks current product status. Architectural rationale belongs in
 - CLAP, VST3, and standalone targets build.
 - The framework-neutral `f64` DSP implements every current effect as an
   independent per-slot processor in a deterministic ascending-slot serial chain.
-- Low Band, Mid Band, and High Band use bounded nonlinear resonant state-variable
-  filters with drive, envelope response, deterministic motion, and saturated
-  feedback under the existing seven-macro slot schema.
+- Filter uses one bounded nonlinear resonant state-variable processor with
+  Low-pass, Band-pass, and High-pass Mode values, plus drive, envelope response,
+  deterministic motion, and saturated feedback.
 - At most six continuous processors are active. New requests suspend the oldest
   admitted processor, and still-held suspended requests restore
   most-recently-held first.
@@ -35,8 +38,9 @@ This file tracks current product status. Architectural rationale belongs in
   factory kits, the native kit codec, and the stereo performance waveform are
   implemented.
 - The frozen experimental `dsp-contract-v1` corpus is preserved unchanged.
-  `dsp-contract-v2-serial` owns the canonical serial outputs and new serial,
-  cap, history, and chain-position scenarios.
+  `dsp-contract-v2-serial` preserves the first canonical serial outputs, and
+  `dsp-contract-v3-unified-filter` preserves the unified Filter milestone, and
+  `dsp-contract-v4-grain-pitch` is the current sound contract.
 - Processing is allocation-free after activation according to `rt-paranoid`.
 - Three deterministic size baselines plus captured-state and Vinyl baselines
   exist for the Slint editor.
@@ -49,6 +53,15 @@ This file tracks current product status. Architectural rationale belongs in
 
 ## Next: serial release sign-off
 
+- Finish recorded type/macro automation and filter listening acceptance in
+  `TESTING.md`. VST3 knob synchronization and type-default writes pass live host
+  checks; VST3/CLAP fresh defaults and custom Wet recall pass. Headless regression
+  tests cover previously edited knobs and every Classic kit startup control.
+- Finish Pitch listening in CLAP and VST3: repeated Down/Up taps, final-Trigger
+  reset, tempo preservation, grain controls, automation recall, serial stacking,
+  and worst-case CPU. Automated DSP/wrapper tests, CLAP Validator, installed
+  VST3 discovery, native-editor opening, and Classic role/default inspection
+  pass.
 - Finish Vinyl listening and recorded-automation acceptance, mono/stereo source
   checks, and six-stage host CPU measurements in `TESTING.md`. CLAP/VST3 selector,
   native-editor opening, and project recall of all seven macros pass in REAPER.
@@ -65,8 +78,8 @@ This file tracks current product status. Architectural rationale belongs in
 - Measure activation memory at supported sample rates and record controlled CPU
   baselines at active caps of one through six with visualization publishing
   enabled, including worst-case nonlinear filters.
-- Complete focused listening acceptance for the nonlinear Low/Mid/High filters,
-  including resonance, drive, envelope, motion, feedback, automation sweeps, and
+- Complete focused listening acceptance for the nonlinear Filter's LP/BP/HP
+  modes, including resonance, drive, envelope, motion, automation sweeps, and
   six-stage serial stacking.
 - Run pluginval GUI tests in an interactive desktop session.
 - Add deterministic screenshot states for direct-key-held, MIDI-held, reverse,

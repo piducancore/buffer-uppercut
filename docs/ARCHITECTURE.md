@@ -59,8 +59,9 @@ For every process block:
 3. Aggregate direct-key, MIDI, automatable trigger, and pointer holds into one
    held state per slot. Releasing one source does not release another source's
    hold.
-4. Apply pitch actions once per aggregate released-to-held transition. Pitch
-   actions do not enter the continuous audio chain.
+4. Detect held Pitch Trigger roles. While a Trigger is held, apply Down and Up
+   roles once per aggregate released-to-held transition; reset Active Shift when
+   the final Trigger releases. Action roles do not enter the audio chain.
 5. Copy host input into activation-sized planar `f64` scratch.
 6. Resolve held, active, and suspended continuous slots under the six-processor
    cap.
@@ -94,8 +95,17 @@ is current when the slot returns. Aggregate release removes the slot from
 admission and resets its processor state, but a configured buffer history keeps
 recording and is available to the next press.
 
-Pitch Down, Pitch Reset, and Pitch Up are edge-triggered host parameter actions.
-Off and pitch actions do not consume the continuous-processor cap.
+Pitch is one configurable effect. A Trigger role is a continuous dual-grain
+stage; Down and Up roles are edge-triggered host parameter actions while any
+Trigger is held. Off and Pitch action roles do not consume the continuous cap.
+
+## Grain Pitch processor
+
+`dsp/src/pitch.rs` owns the tempo-preserving dual-grain delay shifter.
+`dsp/src/lib.rs` owns its slot lifecycle and semantic control metadata. Every
+slot prepares bounded stereo delay storage during activation, so role and type
+changes do not allocate in `process`. Beat Repeat and Reverse own their separate
+Slice Pitch control and do not read Active Shift.
 
 ## Buffer history and type changes
 
@@ -148,8 +158,9 @@ parameter count. Direct-key enablement, MIDI illumination, input held-state
 bridges, admission status, kit reset sequence, and waveform frames are runtime
 fields.
 
-The DSP never mutates the parameter store. Pitch actions emit a host
-`ParamChange` event, allowing each wrapper to record the change correctly.
+The DSP never mutates the parameter store. The wrapper emits a host
+`ParamChange` event when Pitch actions change Active Shift or Trigger release
+returns it to zero, allowing each wrapper to record the change correctly.
 
 ## Kit and state flow
 
