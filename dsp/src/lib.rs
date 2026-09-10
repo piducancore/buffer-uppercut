@@ -4,6 +4,7 @@
 //! Allocation is confined to [`Engine::reset`]; [`Engine::process`] only
 //! mutates already-prepared storage.
 
+mod pitch;
 mod vinyl;
 
 pub const NUM_PADS: usize = 16;
@@ -53,14 +54,10 @@ pub enum EffectType {
     Reverse = 2,
     TapeStop = 3,
     Gate = 4,
-    PitchDown = 5,
-    PitchReset = 6,
-    PitchUp = 7,
-    BandLow = 8,
-    BandMid = 9,
-    BandHigh = 10,
-    LoFi = 11,
-    Vinyl = 12,
+    Pitch = 5,
+    Filter = 6,
+    LoFi = 7,
+    Vinyl = 8,
 }
 
 impl EffectType {
@@ -71,14 +68,10 @@ impl EffectType {
             2 => Self::Reverse,
             3 => Self::TapeStop,
             4 => Self::Gate,
-            5 => Self::PitchDown,
-            6 => Self::PitchReset,
-            7 => Self::PitchUp,
-            8 => Self::BandLow,
-            9 => Self::BandMid,
-            10 => Self::BandHigh,
-            11 => Self::LoFi,
-            12 => Self::Vinyl,
+            5 => Self::Pitch,
+            6 => Self::Filter,
+            7 => Self::LoFi,
+            8 => Self::Vinyl,
             _ => Self::Off,
         }
     }
@@ -89,17 +82,12 @@ impl EffectType {
     }
 
     #[must_use]
-    pub const fn is_pitch_action(self) -> bool {
-        matches!(self, Self::PitchDown | Self::PitchReset | Self::PitchUp)
-    }
-
-    #[must_use]
     pub const fn active_control_count(self) -> usize {
         match self {
             Self::Off => 0,
             Self::Gate => 6,
-            Self::PitchDown | Self::PitchReset | Self::PitchUp => 1,
-            Self::BandLow | Self::BandMid | Self::BandHigh => NUM_MACROS,
+            Self::Pitch => NUM_MACROS,
+            Self::Filter => NUM_MACROS,
             Self::LoFi => 3,
             Self::Vinyl => NUM_MACROS,
             Self::BeatRepeat | Self::Reverse | Self::TapeStop => NUM_MACROS,
@@ -120,27 +108,31 @@ impl EffectType {
         match self {
             Self::Off => "",
             Self::BeatRepeat => [
-                "CELL", "LOOKBACK", "WET", "MODE", "PITCH", "DECAY", "JITTER",
+                "CELL",
+                "LOOKBACK",
+                "WET",
+                "MODE",
+                "SLICE PITCH",
+                "DECAY",
+                "JITTER",
             ][control],
             Self::Reverse => [
-                "LENGTH", "WET", "MODE", "PITCH", "DECAY", "OFFSET", "JITTER",
+                "LENGTH",
+                "WET",
+                "MODE",
+                "SLICE PITCH",
+                "DECAY",
+                "OFFSET",
+                "JITTER",
             ][control],
             Self::TapeStop => ["TIME", "CURVE", "START", "WET", "MODE", "OFFSET", "FADE"][control],
             Self::Gate => ["GRID", "DUTY", "DEPTH", "ATTACK", "RELEASE", "PHASE", ""][control],
-            Self::PitchDown | Self::PitchUp => ["STEP", "", "", "", "", "", ""][control],
-            Self::PitchReset => ["TARGET", "", "", "", "", "", ""][control],
-            Self::BandLow | Self::BandHigh => [
-                "CUTOFF",
-                "RESONANCE",
-                "DRIVE",
-                "ENVELOPE",
-                "MOTION",
-                "FEEDBACK",
-                "WET",
+            Self::Pitch => [
+                "ROLE", "STEP", "GRAIN", "TEXTURE", "SMOOTH", "FEEDBACK", "WET",
             ][control],
-            Self::BandMid => [
-                "CENTER",
-                "WIDTH",
+            Self::Filter => [
+                "MODE",
+                "FREQUENCY",
                 "RESONANCE",
                 "DRIVE",
                 "ENVELOPE",
@@ -150,6 +142,85 @@ impl EffectType {
             Self::LoFi => ["RATE", "BITS", "WET", "", "", "", ""][control],
             Self::Vinyl => ["WOW", "FLUTTER", "WEAR", "DRIVE", "DUST", "NOISE", "WET"][control],
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FilterMode {
+    LowPass,
+    #[default]
+    BandPass,
+    HighPass,
+}
+
+impl FilterMode {
+    #[must_use]
+    pub fn from_normalized(value: f64) -> Self {
+        match (clamp_macro(value) * 2.0).round() as i32 {
+            0 => Self::LowPass,
+            1 => Self::BandPass,
+            _ => Self::HighPass,
+        }
+    }
+
+    #[must_use]
+    pub const fn normalized(self) -> f64 {
+        match self {
+            Self::LowPass => 0.0,
+            Self::BandPass => 0.5,
+            Self::HighPass => 1.0,
+        }
+    }
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LowPass => "LOW-PASS",
+            Self::BandPass => "BAND-PASS",
+            Self::HighPass => "HIGH-PASS",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PitchRole {
+    Down,
+    #[default]
+    Trigger,
+    Up,
+}
+
+impl PitchRole {
+    #[must_use]
+    pub fn from_normalized(value: f64) -> Self {
+        match (clamp_macro(value) * 2.0).round() as i32 {
+            0 => Self::Down,
+            1 => Self::Trigger,
+            _ => Self::Up,
+        }
+    }
+
+    #[must_use]
+    pub const fn normalized(self) -> f64 {
+        match self {
+            Self::Down => 0.0,
+            Self::Trigger => 0.5,
+            Self::Up => 1.0,
+        }
+    }
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Down => "DOWN",
+            Self::Trigger => "TRIGGER",
+            Self::Up => "UP",
+        }
+    }
+
+    #[must_use]
+    pub const fn is_action(self) -> bool {
+        matches!(self, Self::Down | Self::Up)
     }
 }
 
@@ -342,22 +413,20 @@ pub fn format_control_value(effect_type: EffectType, control: usize, normalized:
             3 => format!("{:.1} ms", denormalize_linear(normalized, 0.0, 20.0)),
             _ => format!("{:.1} ms", denormalize_linear(normalized, 0.0, 100.0)),
         },
-        EffectType::PitchDown | EffectType::PitchUp => format!(
-            "{:.0} st",
-            denormalize_linear(normalized, 1.0, 24.0).round()
-        ),
-        EffectType::PitchReset => format!(
-            "{:+.0} st",
-            denormalize_linear(normalized, -24.0, 24.0).round()
-        ),
-        EffectType::BandLow | EffectType::BandHigh => match control {
-            0 => format!("{:.0} Hz", filter_frequency(normalized)),
-            1 | 3 | 4 | 5 | 6 => percent(normalized),
-            _ => format!("{:.1} dB", denormalize_linear(normalized, 0.0, 30.0)),
+        EffectType::Pitch => match control {
+            0 => PitchRole::from_normalized(normalized).label().to_owned(),
+            1 => format!(
+                "{:.0} st",
+                denormalize_linear(normalized, 1.0, 24.0).round()
+            ),
+            2 => format!("{:.0} ms", denormalize_linear(normalized, 12.0, 120.0)),
+            4 => format!("{:.0} ms", denormalize_linear(normalized, 2.0, 120.0)),
+            _ => percent(normalized),
         },
-        EffectType::BandMid => match control {
-            0 => format!("{:.0} Hz", filter_frequency(normalized)),
-            1 | 2 | 4 | 5 | 6 => percent(normalized),
+        EffectType::Filter => match control {
+            0 => FilterMode::from_normalized(normalized).label().to_owned(),
+            1 => format!("{:.0} Hz", filter_frequency(normalized)),
+            2 | 4 | 5 | 6 => percent(normalized),
             _ => format!("{:.1} dB", denormalize_linear(normalized, 0.0, 30.0)),
         },
         EffectType::Vinyl => match control {
@@ -382,22 +451,19 @@ pub fn filter_frequency(normalized: f64) -> f64 {
 
 #[must_use]
 pub fn pitch_step(config: &PadConfig) -> f64 {
-    denormalize_linear(config.macros[0], 1.0, 24.0).round()
+    denormalize_linear(config.macros[1], 1.0, 24.0).round()
 }
 
 #[must_use]
-pub fn pitch_reset_target(config: &PadConfig) -> f64 {
-    denormalize_linear(config.macros[0], -24.0, 24.0).round()
-}
-
-#[must_use]
-pub fn apply_pitch_action(current: f64, effect: EffectType, config: &PadConfig) -> f64 {
+pub fn apply_pitch_action(current: f64, config: &PadConfig) -> f64 {
     let current = if current.is_finite() { current } else { 0.0 }.clamp(-24.0, 24.0);
-    match effect {
-        EffectType::PitchDown => (current - pitch_step(config)).clamp(-24.0, 24.0),
-        EffectType::PitchUp => (current + pitch_step(config)).clamp(-24.0, 24.0),
-        EffectType::PitchReset => pitch_reset_target(config).clamp(-24.0, 24.0),
-        _ => current,
+    if config.effect_type != EffectType::Pitch {
+        return current;
+    }
+    match PitchRole::from_normalized(config.macros[0]) {
+        PitchRole::Down => (current - pitch_step(config)).clamp(-24.0, 24.0),
+        PitchRole::Up => (current + pitch_step(config)).clamp(-24.0, 24.0),
+        PitchRole::Trigger => current,
     }
 }
 
@@ -437,45 +503,8 @@ pub fn default_pad_config(effect_type: EffectType) -> PadConfig {
                 0.0,
             ];
         }
-        EffectType::PitchDown | EffectType::PitchUp => {
-            config.macros[0] = normalize_linear(1.0, 1.0, 24.0);
-        }
-        EffectType::PitchReset => {
-            config.macros[0] = normalize_linear(0.0, -24.0, 24.0);
-        }
-        EffectType::BandLow => {
-            config.macros = [
-                normalize_linear(260.0_f64.ln(), 20.0_f64.ln(), 20000.0_f64.ln()),
-                0.35,
-                0.2,
-                0.0,
-                0.0,
-                0.15,
-                1.0,
-            ];
-        }
-        EffectType::BandMid => {
-            config.macros = [
-                normalize_linear(1200.0_f64.ln(), 20.0_f64.ln(), 20000.0_f64.ln()),
-                0.5,
-                0.35,
-                0.2,
-                0.0,
-                0.0,
-                1.0,
-            ];
-        }
-        EffectType::BandHigh => {
-            config.macros = [
-                normalize_linear(3600.0_f64.ln(), 20.0_f64.ln(), 20000.0_f64.ln()),
-                0.35,
-                0.2,
-                0.0,
-                0.0,
-                0.15,
-                1.0,
-            ];
-        }
+        EffectType::Pitch => return pitch_config(PitchRole::Trigger, 1.0),
+        EffectType::Filter => return filter_config(FilterMode::BandPass, 1200.0),
         EffectType::LoFi => {
             config.macros = [
                 normalize_linear(11025.0, 1000.0, 44100.0),
@@ -496,6 +525,42 @@ pub fn default_pad_config(effect_type: EffectType) -> PadConfig {
 }
 
 #[must_use]
+pub fn pitch_config(role: PitchRole, step: f64) -> PadConfig {
+    PadConfig {
+        effect_type: EffectType::Pitch,
+        macros: [
+            role.normalized(),
+            normalize_linear(step.round().clamp(1.0, 24.0), 1.0, 24.0),
+            normalize_linear(48.0, 12.0, 120.0),
+            0.2,
+            normalize_linear(18.0, 2.0, 120.0),
+            0.0,
+            1.0,
+        ],
+    }
+}
+
+#[must_use]
+pub fn filter_config(mode: FilterMode, frequency: f64) -> PadConfig {
+    PadConfig {
+        effect_type: EffectType::Filter,
+        macros: [
+            mode.normalized(),
+            normalize_linear(
+                frequency.clamp(20.0, 20_000.0).ln(),
+                20.0_f64.ln(),
+                20_000.0_f64.ln(),
+            ),
+            0.35,
+            0.2,
+            0.0,
+            0.0,
+            1.0,
+        ],
+    }
+}
+
+#[must_use]
 pub fn classic_state() -> PerformanceState {
     const TYPES: [EffectType; NUM_PADS] = [
         EffectType::BeatRepeat,
@@ -507,12 +572,12 @@ pub fn classic_state() -> PerformanceState {
         EffectType::Reverse,
         EffectType::TapeStop,
         EffectType::Gate,
-        EffectType::PitchDown,
-        EffectType::PitchReset,
-        EffectType::PitchUp,
-        EffectType::BandLow,
-        EffectType::BandMid,
-        EffectType::BandHigh,
+        EffectType::Pitch,
+        EffectType::Pitch,
+        EffectType::Pitch,
+        EffectType::Filter,
+        EffectType::Filter,
+        EffectType::Filter,
         EffectType::LoFi,
     ];
     let mut state = PerformanceState::default();
@@ -526,6 +591,12 @@ pub fn classic_state() -> PerformanceState {
     state.pads[4].macros[1] = lookback_normalized(6);
     state.pads[5].macros[0] = grid_normalized(2);
     state.pads[5].macros[1] = lookback_normalized(7);
+    state.pads[9] = pitch_config(PitchRole::Down, 1.0);
+    state.pads[10] = pitch_config(PitchRole::Trigger, 1.0);
+    state.pads[11] = pitch_config(PitchRole::Up, 1.0);
+    state.pads[12] = filter_config(FilterMode::LowPass, 260.0);
+    state.pads[13] = filter_config(FilterMode::BandPass, 1200.0);
+    state.pads[14] = filter_config(FilterMode::HighPass, 3600.0);
     state
 }
 
@@ -631,6 +702,7 @@ impl BufferState {
 
 struct SlotRuntime {
     configured_type: EffectType,
+    configured_continuous: bool,
     held: bool,
     active: bool,
     suspended: bool,
@@ -639,6 +711,7 @@ struct SlotRuntime {
     processor_ready: bool,
     buffer: BufferState,
     vinyl: vinyl::Vinyl,
+    pitch: pitch::GrainPitch,
     filter_a: [f64; 2],
     filter_b: [f64; 2],
     filter_envelope: f64,
@@ -654,6 +727,7 @@ impl SlotRuntime {
     fn new(slot: usize) -> Self {
         Self {
             configured_type: EffectType::Off,
+            configured_continuous: false,
             held: false,
             active: false,
             suspended: false,
@@ -662,6 +736,7 @@ impl SlotRuntime {
             processor_ready: false,
             buffer: BufferState::new(slot),
             vinyl: vinyl::Vinyl::new(slot),
+            pitch: pitch::GrainPitch::new(slot),
             filter_a: [0.0; 2],
             filter_b: [0.0; 2],
             filter_envelope: 0.0,
@@ -677,6 +752,7 @@ impl SlotRuntime {
     fn reset_processor(&mut self) {
         self.buffer.reset_capture();
         self.vinyl.reset();
+        self.pitch.reset();
         self.filter_a = [0.0; 2];
         self.filter_b = [0.0; 2];
         self.filter_envelope = 0.0;
@@ -691,6 +767,7 @@ impl SlotRuntime {
 
     fn clear_runtime(&mut self) {
         self.configured_type = EffectType::Off;
+        self.configured_continuous = false;
         self.held = false;
         self.active = false;
         self.suspended = false;
@@ -752,6 +829,7 @@ impl Engine {
         for slot in &mut self.slots {
             slot.buffer.prepare(length);
             slot.vinyl.prepare(self.sample_rate);
+            slot.pitch.prepare(self.sample_rate);
         }
         self.clear_transient();
     }
@@ -839,18 +917,19 @@ impl Engine {
         for (slot_index, request) in new_continuous_request.iter_mut().enumerate() {
             let old_type = self.slots[slot_index].configured_type;
             let new_type = state.pads[slot_index].effect_type;
-            if old_type == new_type {
+            let old_continuous = self.slots[slot_index].configured_continuous;
+            let new_continuous = Self::is_continuous(&state.pads[slot_index]);
+            if old_type == new_type && old_continuous == new_continuous {
                 continue;
             }
 
-            let old_continuous = Self::is_continuous(old_type);
-            let new_continuous = Self::is_continuous(new_type);
             if !old_type.is_buffer() && new_type.is_buffer() {
                 self.slots[slot_index].buffer.clear_history();
             } else {
                 self.slots[slot_index].buffer.reset_capture();
             }
             self.slots[slot_index].vinyl.reset();
+            self.slots[slot_index].pitch.reset();
             self.slots[slot_index].filter_a = [0.0; 2];
             self.slots[slot_index].filter_b = [0.0; 2];
             self.slots[slot_index].filter_envelope = 0.0;
@@ -862,6 +941,7 @@ impl Engine {
             self.slots[slot_index].gate_gain = 1.0;
             self.slots[slot_index].processor_ready = false;
             self.slots[slot_index].configured_type = new_type;
+            self.slots[slot_index].configured_continuous = new_continuous;
 
             if old_continuous && !new_continuous {
                 self.remove_from_admission(slot_index);
@@ -883,7 +963,7 @@ impl Engine {
 
         for (slot_index, new_request) in new_continuous_request.into_iter().enumerate() {
             let rising = state.held[slot_index] && !self.slots[slot_index].held;
-            if (rising || new_request) && Self::is_continuous(state.pads[slot_index].effect_type) {
+            if (rising || new_request) && Self::is_continuous(&state.pads[slot_index]) {
                 self.admit_new_request(slot_index, &state.pads[slot_index], samples_per_beat);
             }
             self.slots[slot_index].held = state.held[slot_index];
@@ -911,7 +991,10 @@ impl Engine {
             let mut newest_request = 0;
             for slot_index in 0..NUM_PADS {
                 let slot = &self.slots[slot_index];
-                if slot.suspended && state.held[slot_index] && slot.request_order >= newest_request
+                if slot.suspended
+                    && state.held[slot_index]
+                    && Self::is_continuous(&state.pads[slot_index])
+                    && slot.request_order >= newest_request
                 {
                     candidate = Some(slot_index);
                     newest_request = slot.request_order;
@@ -974,11 +1057,12 @@ impl Engine {
         oldest
     }
 
-    const fn is_continuous(effect: EffectType) -> bool {
-        !matches!(
-            effect,
-            EffectType::Off | EffectType::PitchDown | EffectType::PitchReset | EffectType::PitchUp
-        )
+    fn is_continuous(config: &PadConfig) -> bool {
+        match config.effect_type {
+            EffectType::Off => false,
+            EffectType::Pitch => PitchRole::from_normalized(config.macros[0]) == PitchRole::Trigger,
+            _ => true,
+        }
     }
 
     fn process_slot(
@@ -991,19 +1075,16 @@ impl Engine {
     ) -> [f64; 2] {
         match config.effect_type {
             EffectType::BeatRepeat | EffectType::Reverse | EffectType::TapeStop => {
-                Self::process_buffer_sample(
-                    &mut slot.buffer,
-                    stage_input,
-                    config,
-                    performance_pitch,
-                )
+                Self::process_buffer_sample(&mut slot.buffer, stage_input, config)
             }
             EffectType::Gate => {
                 Self::apply_gate(slot, stage_input, config, sample_rate, samples_per_beat)
             }
-            EffectType::BandLow | EffectType::BandMid | EffectType::BandHigh => {
-                Self::apply_band(slot, stage_input, config, sample_rate)
+            EffectType::Pitch => {
+                slot.pitch
+                    .process(stage_input, performance_pitch, config, sample_rate)
             }
+            EffectType::Filter => Self::apply_filter(slot, stage_input, config, sample_rate),
             EffectType::LoFi => Self::apply_lofi(slot, stage_input, config, sample_rate),
             EffectType::Vinyl => slot.vinyl.process(stage_input),
             _ => stage_input,
@@ -1309,7 +1390,6 @@ impl Engine {
         buffer: &mut BufferState,
         dry: [f64; 2],
         config: &PadConfig,
-        performance_pitch: f64,
     ) -> [f64; 2] {
         let max_phase = f64::from((buffer.slice_samples - 1).max(0));
         let phase = buffer.repeat_phase.clamp(0.0, max_phase);
@@ -1338,7 +1418,7 @@ impl Engine {
             buffer.stop_amp = amplitude;
             buffer.stop_elapsed += 1;
         } else {
-            let pitch = (Self::common_pitch(config) + performance_pitch).clamp(-48.0, 48.0);
+            let pitch = Self::common_pitch(config).clamp(-24.0, 24.0);
             buffer.play_rate = 2.0_f64.powf(pitch / 12.0);
         }
         repeat[0] *= amplitude;
@@ -1360,7 +1440,7 @@ impl Engine {
         output
     }
 
-    fn apply_band(
+    fn apply_filter(
         slot: &mut SlotRuntime,
         dry: [f64; 2],
         config: &PadConfig,
@@ -1378,29 +1458,13 @@ impl Engine {
             .exp();
         slot.filter_envelope += env_coefficient * (input_level - slot.filter_envelope);
 
-        let (base, resonance, drive, envelope, motion, feedback, wet, width) =
-            match config.effect_type {
-                EffectType::BandMid => (
-                    filter_frequency(config.macros[0]),
-                    config.macros[2],
-                    config.macros[3],
-                    config.macros[4],
-                    config.macros[5],
-                    0.18 * config.macros[2],
-                    config.macros[6],
-                    config.macros[1],
-                ),
-                _ => (
-                    filter_frequency(config.macros[0]),
-                    config.macros[1],
-                    config.macros[2],
-                    config.macros[3],
-                    config.macros[4],
-                    config.macros[5],
-                    config.macros[6],
-                    0.5,
-                ),
-            };
+        let mode = FilterMode::from_normalized(config.macros[0]);
+        let base = filter_frequency(config.macros[1]);
+        let resonance = config.macros[2];
+        let drive = config.macros[3];
+        let envelope = config.macros[4];
+        let motion = config.macros[5];
+        let wet = config.macros[6];
         let lfo = slot.filter_phase.sin();
         slot.filter_phase = (slot.filter_phase
             + std::f64::consts::TAU * (0.08 + 7.92 * motion * motion) / sample_rate)
@@ -1414,7 +1478,7 @@ impl Engine {
         let q = 0.5 + 19.5 * clamp_macro(resonance).powi(2);
         let k = 1.0 / q;
         let gain = 10.0_f64.powf(denormalize_linear(drive, 0.0, 30.0) / 20.0);
-        let feedback_gain = 1.15 * clamp_macro(feedback);
+        let feedback_gain = 0.18 * clamp_macro(resonance);
         let wet = clamp_macro(wet);
         let mut output = dry;
         for channel in 0..2 {
@@ -1426,13 +1490,12 @@ impl Engine {
             slot.filter_a[channel] = 2.0 * v1 - slot.filter_a[channel];
             slot.filter_b[channel] = 2.0 * v2 - slot.filter_b[channel];
             let low = v2;
-            let band = v1 * (0.35 + 1.3 * width);
+            let band = v1;
             let high = driven - k * v1 - v2;
-            let filtered = match config.effect_type {
-                EffectType::BandLow => low,
-                EffectType::BandMid => band,
-                EffectType::BandHigh => high,
-                _ => driven,
+            let filtered = match mode {
+                FilterMode::LowPass => low,
+                FilterMode::BandPass => band,
+                FilterMode::HighPass => high,
             };
             let saturated = filtered.tanh();
             slot.filter_feedback[channel] = saturated;
@@ -1554,6 +1617,30 @@ mod tests {
         assert_eq!(state.pads[0].effect_type, EffectType::BeatRepeat);
         assert_eq!(state.pads[15].effect_type, EffectType::LoFi);
         assert_eq!(state.pads[4].macros[1], lookback_normalized(6));
+        assert_eq!(
+            PitchRole::from_normalized(state.pads[9].macros[0]),
+            PitchRole::Down
+        );
+        assert_eq!(
+            PitchRole::from_normalized(state.pads[10].macros[0]),
+            PitchRole::Trigger
+        );
+        assert_eq!(
+            PitchRole::from_normalized(state.pads[11].macros[0]),
+            PitchRole::Up
+        );
+        assert_eq!(
+            FilterMode::from_normalized(state.pads[12].macros[0]),
+            FilterMode::LowPass
+        );
+        assert_eq!(
+            FilterMode::from_normalized(state.pads[13].macros[0]),
+            FilterMode::BandPass
+        );
+        assert_eq!(
+            FilterMode::from_normalized(state.pads[14].macros[0]),
+            FilterMode::HighPass
+        );
     }
 
     #[test]
@@ -1564,14 +1651,26 @@ mod tests {
                 EffectType::BeatRepeat,
                 7,
                 [
-                    "CELL", "LOOKBACK", "WET", "MODE", "PITCH", "DECAY", "JITTER",
+                    "CELL",
+                    "LOOKBACK",
+                    "WET",
+                    "MODE",
+                    "SLICE PITCH",
+                    "DECAY",
+                    "JITTER",
                 ],
             ),
             (
                 EffectType::Reverse,
                 7,
                 [
-                    "LENGTH", "WET", "MODE", "PITCH", "DECAY", "OFFSET", "JITTER",
+                    "LENGTH",
+                    "WET",
+                    "MODE",
+                    "SLICE PITCH",
+                    "DECAY",
+                    "OFFSET",
+                    "JITTER",
                 ],
             ),
             (
@@ -1584,49 +1683,23 @@ mod tests {
                 6,
                 ["GRID", "DUTY", "DEPTH", "ATTACK", "RELEASE", "PHASE", ""],
             ),
-            (EffectType::PitchDown, 1, ["STEP", "", "", "", "", "", ""]),
             (
-                EffectType::PitchReset,
-                1,
-                ["TARGET", "", "", "", "", "", ""],
-            ),
-            (EffectType::PitchUp, 1, ["STEP", "", "", "", "", "", ""]),
-            (
-                EffectType::BandLow,
+                EffectType::Pitch,
                 7,
                 [
-                    "CUTOFF",
-                    "RESONANCE",
-                    "DRIVE",
-                    "ENVELOPE",
-                    "MOTION",
-                    "FEEDBACK",
-                    "WET",
+                    "ROLE", "STEP", "GRAIN", "TEXTURE", "SMOOTH", "FEEDBACK", "WET",
                 ],
             ),
             (
-                EffectType::BandMid,
+                EffectType::Filter,
                 7,
                 [
-                    "CENTER",
-                    "WIDTH",
+                    "MODE",
+                    "FREQUENCY",
                     "RESONANCE",
                     "DRIVE",
                     "ENVELOPE",
                     "MOTION",
-                    "WET",
-                ],
-            ),
-            (
-                EffectType::BandHigh,
-                7,
-                [
-                    "CUTOFF",
-                    "RESONANCE",
-                    "DRIVE",
-                    "ENVELOPE",
-                    "MOTION",
-                    "FEEDBACK",
                     "WET",
                 ],
             ),
@@ -1677,15 +1750,14 @@ mod tests {
         assert_eq!(format_control_value(EffectType::TapeStop, 2, 0.5), "1.25x");
         assert_eq!(format_control_value(EffectType::Gate, 1, 0.5), "50%");
         assert_eq!(format_control_value(EffectType::Gate, 3, 0.05), "1.0 ms");
-        assert_eq!(format_control_value(EffectType::PitchUp, 0, 0.0), "1 st");
-        assert_eq!(
-            format_control_value(EffectType::PitchReset, 0, 0.5),
-            "+0 st"
-        );
+        assert_eq!(format_control_value(EffectType::Pitch, 0, 0.0), "DOWN");
+        assert_eq!(format_control_value(EffectType::Pitch, 0, 0.5), "TRIGGER");
+        assert_eq!(format_control_value(EffectType::Pitch, 0, 1.0), "UP");
+        assert_eq!(format_control_value(EffectType::Pitch, 1, 0.0), "1 st");
         assert_eq!(
             format_control_value(
-                EffectType::BandMid,
-                0,
+                EffectType::Filter,
+                1,
                 normalize_linear(3600.0_f64.ln(), 20.0_f64.ln(), 20000.0_f64.ln()),
             ),
             "3600 Hz"
@@ -1705,23 +1777,84 @@ mod tests {
         assert_eq!(format_control_value(EffectType::LoFi, 2, 1.0), "100%");
         assert_eq!(format_control_value(EffectType::LoFi, 3, 1.0), "");
         assert_eq!(
-            format_control_value(EffectType::BandLow, 0, f64::NAN),
+            format_control_value(EffectType::Filter, 1, f64::NAN),
             "20 Hz"
+        );
+        assert_eq!(format_control_value(EffectType::Filter, 0, 0.0), "LOW-PASS");
+        assert_eq!(
+            format_control_value(EffectType::Filter, 0, 0.5),
+            "BAND-PASS"
+        );
+        assert_eq!(
+            format_control_value(EffectType::Filter, 0, 1.0),
+            "HIGH-PASS"
         );
     }
 
     #[test]
-    fn pitch_actions_step_reset_and_clamp() {
-        let up = default_pad_config(EffectType::PitchUp);
-        let down = default_pad_config(EffectType::PitchDown);
-        let reset = default_pad_config(EffectType::PitchReset);
-        assert_eq!(apply_pitch_action(0.0, EffectType::PitchUp, &up), 1.0);
-        assert_eq!(apply_pitch_action(0.0, EffectType::PitchDown, &down), -1.0);
-        assert_eq!(
-            apply_pitch_action(14.0, EffectType::PitchReset, &reset),
-            0.0
+    fn pitch_actions_step_in_their_configured_direction_and_clamp() {
+        let up = pitch_config(PitchRole::Up, 2.0);
+        let down = pitch_config(PitchRole::Down, 3.0);
+        let trigger = pitch_config(PitchRole::Trigger, 12.0);
+        assert_eq!(apply_pitch_action(0.0, &up), 2.0);
+        assert_eq!(apply_pitch_action(0.0, &down), -3.0);
+        assert_eq!(apply_pitch_action(14.0, &trigger), 14.0);
+        assert_eq!(apply_pitch_action(24.0, &up), 24.0);
+    }
+
+    #[test]
+    fn pitch_trigger_processes_audio_while_action_roles_do_not_enter_the_chain() {
+        let input: Vec<f64> = (0..2_048)
+            .map(|sample| (f64::from(sample) * 0.17).sin() * 0.7)
+            .collect();
+        let mut trigger_state = PerformanceState::default();
+        trigger_state.pads[0] = pitch_config(PitchRole::Trigger, 1.0);
+        trigger_state.held[0] = true;
+        trigger_state.performance_pitch = 7.0;
+        let mut engine = Engine::new(8_000.0);
+        let mut shifted = vec![0.0; input.len()];
+        let mut right = vec![0.0; input.len()];
+        engine.process(
+            &input,
+            &input,
+            &mut shifted,
+            &mut right,
+            120.0,
+            &trigger_state,
         );
-        assert_eq!(apply_pitch_action(24.0, EffectType::PitchUp, &up), 24.0);
+        assert_ne!(shifted, input);
+        assert_eq!(engine.admission_meta().active_mask, 1);
+
+        let mut action_state = PerformanceState::default();
+        action_state.pads[0] = pitch_config(PitchRole::Up, 7.0);
+        action_state.held[0] = true;
+        let mut engine = Engine::new(8_000.0);
+        let mut dry = vec![0.0; input.len()];
+        engine.process(&input, &input, &mut dry, &mut right, 120.0, &action_state);
+        assert_eq!(dry, input);
+        assert_eq!(engine.admission_meta().active_mask, 0);
+    }
+
+    #[test]
+    fn active_shift_does_not_change_beat_repeat_slice_pitch() {
+        let input: Vec<f64> = (0..8_192)
+            .map(|sample| (sample as f64 * 0.071).sin() * 0.8)
+            .collect();
+        let mut state = PerformanceState::default();
+        state.pads[0] = default_pad_config(EffectType::BeatRepeat);
+        state.held[0] = true;
+
+        let render = |performance_pitch| {
+            let mut engine = Engine::new(8_000.0);
+            let mut state = state;
+            state.performance_pitch = performance_pitch;
+            let mut left = vec![0.0; input.len()];
+            let mut right = vec![0.0; input.len()];
+            engine.process(&input, &input, &mut left, &mut right, 120.0, &state);
+            left
+        };
+
+        assert_eq!(render(0.0), render(12.0));
     }
 
     #[test]
@@ -1749,9 +1882,7 @@ mod tests {
             EffectType::Reverse,
             EffectType::TapeStop,
             EffectType::Gate,
-            EffectType::BandLow,
-            EffectType::BandMid,
-            EffectType::BandHigh,
+            EffectType::Filter,
             EffectType::LoFi,
         ] {
             let output = render(effect, 2_048);
@@ -1762,16 +1893,13 @@ mod tests {
     #[test]
     fn nonlinear_filters_remain_finite_at_macro_and_sample_rate_extremes() {
         for sample_rate in [1.0, 8_000.0, 44_100.0, 192_000.0] {
-            for effect in [
-                EffectType::BandLow,
-                EffectType::BandMid,
-                EffectType::BandHigh,
-            ] {
-                for macros in [[0.0; NUM_MACROS], [1.0; NUM_MACROS], [f64::NAN; NUM_MACROS]] {
+            for mode in [0.0, 0.5, 1.0] {
+                for mut macros in [[0.0; NUM_MACROS], [1.0; NUM_MACROS], [f64::NAN; NUM_MACROS]] {
+                    macros[0] = mode;
                     let mut engine = Engine::new(sample_rate);
                     let mut state = PerformanceState::default();
                     state.pads[0] = PadConfig {
-                        effect_type: effect,
+                        effect_type: EffectType::Filter,
                         macros,
                     };
                     state.held[0] = true;
@@ -1796,7 +1924,7 @@ mod tests {
         for slot in 0..8 {
             state.pads[slot] = default_pad_config(EffectType::Gate);
         }
-        state.pads[8] = default_pad_config(EffectType::PitchUp);
+        state.pads[8] = pitch_config(PitchRole::Up, 1.0);
 
         state.held[..6].fill(true);
         engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
@@ -1870,7 +1998,7 @@ mod tests {
             .collect();
         let mut state = PerformanceState::default();
         state.pads[0] = default_pad_config(EffectType::LoFi);
-        state.pads[1] = default_pad_config(EffectType::BandLow);
+        state.pads[1] = default_pad_config(EffectType::Filter);
 
         let render_press_order = |first: usize, second: usize| {
             let mut engine = Engine::new(2_000.0);
@@ -1912,7 +2040,7 @@ mod tests {
             .map(|sample| (f64::from(sample) * 0.17).sin() * 0.9)
             .collect();
         let mut serial = PerformanceState::default();
-        serial.pads[0] = default_pad_config(EffectType::BandLow);
+        serial.pads[0] = default_pad_config(EffectType::Filter);
         serial.pads[0].macros[1] = 0.45;
         serial.pads[1] = default_pad_config(EffectType::LoFi);
         serial.pads[1].macros[2] = 0.35;
@@ -1968,7 +2096,7 @@ mod tests {
             .map(|sample| (f64::from(sample) * 0.19).sin() * 0.77)
             .collect();
         let mut state = PerformanceState::default();
-        state.pads[0] = default_pad_config(EffectType::BandLow);
+        state.pads[0] = default_pad_config(EffectType::Filter);
         state.pads[1] = default_pad_config(EffectType::BeatRepeat);
         state.pads[2] = default_pad_config(EffectType::BeatRepeat);
         state.pads[3] = default_pad_config(EffectType::LoFi);

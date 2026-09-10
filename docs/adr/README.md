@@ -23,7 +23,14 @@ Current records:
   governs the current serial DSP, admission, buffer-history, lifecycle, and
   direct-key architecture.
 - [0005 — Performance bands use a bounded nonlinear resonant filter](0005-nonlinear-performance-filter.md)
-  governs Low Band, Mid Band, and High Band topology, modulation, nonlinear
-  safety, macro semantics, and per-slot state.
+  records the nonlinear topology that the unified Filter retains.
 - [0006 — Vinyl is an independent record-wear effect](0006-vinyl-simulation.md)
-  governs the thirteenth effect choice, macro semantics, short delay, and kit extension.
+  governs its macro semantics, short delay, and kit extension.
+- [0007 — Editor type changes load effect defaults](0007-editor-effect-defaults.md)
+  governs manual type selection, host defaults, and parameter-driven knob values.
+- [0008 — Unify the performance filters behind a Mode control](0008-unified-filter-effect.md)
+  governs Filter macros and modes, factory configurations, and the v3 DSP
+  milestone; ADR 0009 supersedes its effect numbering.
+- [0009 — Pitch uses held grain processing with action roles](0009-held-grain-pitch.md)
+  governs Pitch roles and controls, active-shift gestures, current effect
+  numbering, and the v4 DSP corpus.

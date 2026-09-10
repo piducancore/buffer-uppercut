@@ -4,7 +4,10 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use buffer_uppercut_dsp::{EffectType, VisualizationBin, VisualizationMode, format_control_value};
+use buffer_uppercut_dsp::{
+    EffectType, FilterMode, PitchRole, VisualizationBin, VisualizationMode, default_pad_config,
+    format_control_value,
+};
 use buffer_uppercut_kit::{FACTORY_KIT_COUNT, Kit, factory_kit};
 use truce::core::editor::PluginContextReadF32;
 use truce::prelude::{Editor, Params, PluginContext};
@@ -29,6 +32,13 @@ enum EditorPreview {
     Captured,
     Pitch,
     Vinyl,
+}
+
+#[derive(Clone, Copy)]
+struct EffectGesture {
+    pad: usize,
+    effect: EffectType,
+    controls_started: bool,
 }
 
 impl EditorPreview {
@@ -94,7 +104,7 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         let macros = Rc::new(VecModel::from(
             (0..NUM_MACROS).map(empty_macro_view).collect::<Vec<_>>(),
         ));
-        let active_effect_gesture = Rc::new(Cell::new(None));
+        let active_effect_gesture = Rc::new(Cell::new(None::<EffectGesture>));
 
         ui.set_pads(ModelRc::from(pads.clone()));
         ui.set_macros(ModelRc::from(macros.clone()));
@@ -169,28 +179,56 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
             let selected_pad = selected_pad.clone();
             let active_effect_gesture = active_effect_gesture.clone();
             ui.on_effect_edit_began(move || {
-                let id = pad_type_id(selected_pad.get());
-                active_effect_gesture.set(Some(id));
-                state.begin_edit(id);
+                let pad = selected_pad.get();
+                active_effect_gesture.set(Some(EffectGesture {
+                    pad,
+                    effect: selected_effect(&state, pad),
+                    controls_started: false,
+                }));
+                state.begin_edit(pad_type_id(pad));
             });
         }
         {
             let state = state.clone();
             let active_effect_gesture = active_effect_gesture.clone();
             ui.on_effect_value_changed(move |value| {
-                let Some(id) = active_effect_gesture.get() else {
+                let Some(mut gesture) = active_effect_gesture.get() else {
                     return;
                 };
-                let effect = effect_index_from_normalized(value);
-                state.set_param(id, truce::core::cast::discrete_norm(effect, EFFECT_COUNT));
+                let effect_index = effect_index_from_normalized(value);
+                let effect = EffectType::from_index(effect_index as i32);
+                if effect == gesture.effect {
+                    return;
+                }
+
+                if !gesture.controls_started {
+                    for control in 0..NUM_MACROS {
+                        state.begin_edit(pad_control_id(gesture.pad, control));
+                    }
+                    gesture.controls_started = true;
+                }
+                state.set_param(
+                    pad_type_id(gesture.pad),
+                    truce::core::cast::discrete_norm(effect_index, EFFECT_COUNT),
+                );
+                for (control, value) in default_pad_config(effect).macros.into_iter().enumerate() {
+                    state.set_param(pad_control_id(gesture.pad, control), value);
+                }
+                gesture.effect = effect;
+                active_effect_gesture.set(Some(gesture));
             });
         }
         {
             let state = state.clone();
             let active_effect_gesture = active_effect_gesture.clone();
             ui.on_effect_edit_ended(move || {
-                if let Some(id) = active_effect_gesture.take() {
-                    state.end_edit(id);
+                if let Some(gesture) = active_effect_gesture.take() {
+                    state.end_edit(pad_type_id(gesture.pad));
+                    if gesture.controls_started {
+                        for control in 0..NUM_MACROS {
+                            state.end_edit(pad_control_id(gesture.pad, control));
+                        }
+                    }
                 }
             });
         }
@@ -209,13 +247,21 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         }
         {
             let state = state.clone();
+            let selected_pad = selected_pad.clone();
             let active_macro_gestures = active_macro_gestures.clone();
             ui.on_macro_value_changed(move |control, value| {
                 let Some(control) = valid_macro_index(control) else {
                     return;
                 };
                 if let Some(id) = active_macro_gestures[control].get() {
-                    state.set_param(id, f64::from(value));
+                    state.set_param(
+                        id,
+                        macro_value_for_effect(
+                            selected_effect(&state, selected_pad.get()),
+                            control,
+                            value,
+                        ),
+                    );
                 }
             });
         }
@@ -286,7 +332,10 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                         number: SharedString::from(format!("{:02}", pad + 1)),
                         key: SharedString::from(physical_key_label(pad)),
                         note: SharedString::from(format!("{}", pad + 60)),
-                        effect: SharedString::from(effect_abbreviation(effect)),
+                        effect: SharedString::from(pad_effect_abbreviation(
+                            effect,
+                            state.get_param(pad_control_id(pad, 0)),
+                        )),
                         held: trigger_held
                             || midi_held_bits & (1_u16 << pad) != 0
                             || direct_key_held_bits & (1_u16 << pad) != 0
@@ -479,6 +528,19 @@ fn effect_index_from_normalized(value: f32) -> usize {
     (value.clamp(0.0, 1.0) * (EFFECT_COUNT - 1) as f32).round() as usize
 }
 
+fn macro_value_for_effect(effect: EffectType, control: usize, value: f32) -> f64 {
+    if control == 0 {
+        match effect {
+            EffectType::Filter => {
+                return FilterMode::from_normalized(f64::from(value)).normalized();
+            }
+            EffectType::Pitch => return PitchRole::from_normalized(f64::from(value)).normalized(),
+            _ => {}
+        }
+    }
+    f64::from(value.clamp(0.0, 1.0))
+}
+
 fn empty_pad_view(pad: usize) -> PadView {
     PadView {
         number: SharedString::from(format!("{:02}", pad + 1)),
@@ -522,12 +584,8 @@ fn effect_name(effect: EffectType) -> &'static str {
         EffectType::Reverse => "Reverse",
         EffectType::TapeStop => "Tape Stop",
         EffectType::Gate => "Gate",
-        EffectType::PitchDown => "Pitch Down",
-        EffectType::PitchReset => "Pitch Reset",
-        EffectType::PitchUp => "Pitch Up",
-        EffectType::BandLow => "Low Band",
-        EffectType::BandMid => "Mid Band",
-        EffectType::BandHigh => "High Band",
+        EffectType::Pitch => "Pitch",
+        EffectType::Filter => "Filter",
         EffectType::LoFi => "LoFi",
         EffectType::Vinyl => "Vinyl",
     }
@@ -540,14 +598,26 @@ fn effect_abbreviation(effect: EffectType) -> &'static str {
         EffectType::Reverse => "REV",
         EffectType::TapeStop => "STOP",
         EffectType::Gate => "GATE",
-        EffectType::PitchDown => "PITCH -",
-        EffectType::PitchReset => "PITCH 0",
-        EffectType::PitchUp => "PITCH +",
-        EffectType::BandLow => "LO",
-        EffectType::BandMid => "MID",
-        EffectType::BandHigh => "HI",
+        EffectType::Pitch => "PITCH",
+        EffectType::Filter => "FILTER",
         EffectType::LoFi => "LOFI",
         EffectType::Vinyl => "VINYL",
+    }
+}
+
+fn pad_effect_abbreviation(effect: EffectType, first_macro: f32) -> &'static str {
+    match effect {
+        EffectType::Filter => match FilterMode::from_normalized(f64::from(first_macro)) {
+            FilterMode::LowPass => "LP",
+            FilterMode::BandPass => "BP",
+            FilterMode::HighPass => "HP",
+        },
+        EffectType::Pitch => match PitchRole::from_normalized(f64::from(first_macro)) {
+            PitchRole::Down => "PITCH -",
+            PitchRole::Trigger => "PITCH",
+            PitchRole::Up => "PITCH +",
+        },
+        _ => effect_abbreviation(effect),
     }
 }
 
@@ -663,6 +733,81 @@ mod tests {
         }
         assert_eq!(effect_index_from_normalized(-1.0), 0);
         assert_eq!(effect_index_from_normalized(2.0), EFFECT_COUNT - 1);
+    }
+
+    #[test]
+    fn three_position_role_knobs_quantize() {
+        assert_eq!(macro_value_for_effect(EffectType::Filter, 0, 0.1), 0.0);
+        assert_eq!(macro_value_for_effect(EffectType::Filter, 0, 0.5), 0.5);
+        assert_eq!(macro_value_for_effect(EffectType::Filter, 0, 0.9), 1.0);
+        assert_eq!(macro_value_for_effect(EffectType::Pitch, 0, 0.1), 0.0);
+        assert_eq!(macro_value_for_effect(EffectType::Pitch, 0, 0.5), 0.5);
+        assert_eq!(macro_value_for_effect(EffectType::Pitch, 0, 0.9), 1.0);
+        assert_eq!(
+            macro_value_for_effect(EffectType::Gate, 0, 0.1),
+            0.1_f32 as f64
+        );
+    }
+
+    #[test]
+    fn macro_drag_uses_current_pad_value_after_model_changes() {
+        use slint::platform::{PointerEventButton, WindowEvent};
+        use truce_slint::platform;
+
+        platform::ensure_platform();
+        let window = platform::create_slint_window();
+        window.set_size(slint::PhysicalSize::new(1120, 700));
+        let ui = BufferUppercutUi::new().unwrap();
+        let macros = Rc::new(VecModel::from(
+            (0..NUM_MACROS)
+                .map(|_| MacroView {
+                    label: "WET".into(),
+                    value: 1.0,
+                    value_text: "100%".into(),
+                    enabled: true,
+                })
+                .collect::<Vec<_>>(),
+        ));
+        ui.set_macros(ModelRc::from(macros.clone()));
+        let last_value = Rc::new(Cell::new(None));
+        ui.on_macro_value_changed({
+            let last_value = last_value.clone();
+            move |control, value| last_value.set(Some((control, value)))
+        });
+        let mut pixels = Vec::new();
+        let mut rgba = Vec::new();
+        let mut render = || {
+            window.request_redraw();
+            platform::render_to_rgba(&window, 1120, 700, &mut pixels, &mut rgba);
+        };
+        render();
+        let drag = || {
+            let position = slint::LogicalPosition::new(1060.0, 520.0);
+            window.dispatch_event(WindowEvent::PointerPressed {
+                position,
+                button: PointerEventButton::Left,
+            });
+            let position = slint::LogicalPosition::new(1060.0, 534.5);
+            window.dispatch_event(WindowEvent::PointerMoved { position });
+            window.dispatch_event(WindowEvent::PointerReleased {
+                position,
+                button: PointerEventButton::Left,
+            });
+        };
+        drag();
+        let (control, value) = last_value.get().expect("drag reaches Wet knob");
+        assert_eq!(control, 6);
+        assert!((value - 0.9).abs() < 1e-5);
+
+        // Selecting another pad or recalling parameters changes this same row.
+        let mut row = macros.row_data(6).unwrap();
+        row.value = 0.4;
+        row.value_text = "40%".into();
+        macros.set_row_data(6, row);
+        render();
+        drag();
+        let (_, value) = last_value.get().unwrap();
+        assert!((value - 0.3).abs() < 1e-5, "drag used stale value: {value}");
     }
 
     #[test]

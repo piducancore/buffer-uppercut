@@ -4,8 +4,9 @@
 use std::fmt;
 
 use buffer_uppercut_dsp::{
-    EffectType, NUM_MACROS, NUM_PADS, PadConfig, PerformanceState, clamp_macro, classic_state,
-    default_pad_config, grid_normalized, lookback_normalized, normalize_linear,
+    EffectType, FilterMode, NUM_MACROS, NUM_PADS, PadConfig, PerformanceState, PitchRole,
+    clamp_macro, classic_state, default_pad_config, filter_config, grid_normalized,
+    lookback_normalized, normalize_linear, pitch_config,
 };
 
 pub const KIT_VERSION: u32 = 1;
@@ -201,13 +202,13 @@ pub fn glitch_grid_kit() -> Kit {
             EffectType::BeatRepeat,
             EffectType::Reverse,
             EffectType::Gate,
-            EffectType::PitchDown,
-            EffectType::PitchReset,
-            EffectType::PitchUp,
+            EffectType::Pitch,
+            EffectType::Pitch,
+            EffectType::Pitch,
             EffectType::LoFi,
-            EffectType::BandLow,
-            EffectType::BandMid,
-            EffectType::BandHigh,
+            EffectType::Filter,
+            EffectType::Filter,
+            EffectType::Filter,
             EffectType::Off,
         ],
     );
@@ -223,10 +224,14 @@ pub fn glitch_grid_kit() -> Kit {
     kit.state.pads[5].macros[4] = normalize_linear(-7.0, -24.0, 24.0);
     kit.state.pads[6].macros[0] = grid_normalized(4);
     kit.state.pads[7].macros[1] = normalize_linear(35.0, 5.0, 95.0);
-    kit.state.pads[8].macros[0] = normalize_linear(2.0, 1.0, 24.0);
-    kit.state.pads[10].macros[0] = normalize_linear(2.0, 1.0, 24.0);
+    kit.state.pads[8] = pitch_config(PitchRole::Down, 2.0);
+    kit.state.pads[9] = pitch_config(PitchRole::Trigger, 1.0);
+    kit.state.pads[10] = pitch_config(PitchRole::Up, 2.0);
     kit.state.pads[11].macros[0] = normalize_linear(8000.0, 1000.0, 44100.0);
     kit.state.pads[11].macros[1] = normalize_linear(6.0, 2.0, 16.0);
+    kit.state.pads[12] = filter_config(FilterMode::LowPass, 260.0);
+    kit.state.pads[13] = filter_config(FilterMode::BandPass, 1_200.0);
+    kit.state.pads[14] = filter_config(FilterMode::HighPass, 3_600.0);
     kit
 }
 
@@ -249,7 +254,7 @@ pub fn tape_lab_kit() -> Kit {
             EffectType::BeatRepeat,
             EffectType::Gate,
             EffectType::LoFi,
-            EffectType::PitchReset,
+            EffectType::Pitch,
             EffectType::Off,
         ],
     );
@@ -267,6 +272,7 @@ pub fn tape_lab_kit() -> Kit {
     kit.state.pads[11] = beat_repeat_config(4, 0);
     kit.state.pads[11].macros[4] = normalize_linear(7.0, -24.0, 24.0);
     kit.state.pads[12].macros[0] = grid_normalized(3);
+    kit.state.pads[14] = pitch_config(PitchRole::Trigger, 1.0);
     kit
 }
 
@@ -275,29 +281,28 @@ pub fn filter_pitch_kit() -> Kit {
     let mut kit = kit_with_types(
         "Filter & Pitch",
         [
-            EffectType::BandLow,
-            EffectType::BandLow,
-            EffectType::BandMid,
-            EffectType::BandHigh,
+            EffectType::Filter,
+            EffectType::Filter,
+            EffectType::Filter,
+            EffectType::Filter,
             EffectType::LoFi,
             EffectType::LoFi,
             EffectType::Gate,
             EffectType::Gate,
-            EffectType::PitchDown,
-            EffectType::PitchDown,
-            EffectType::PitchReset,
-            EffectType::PitchUp,
-            EffectType::PitchUp,
+            EffectType::Pitch,
+            EffectType::Pitch,
+            EffectType::Pitch,
+            EffectType::Pitch,
+            EffectType::Pitch,
             EffectType::BeatRepeat,
             EffectType::Reverse,
             EffectType::Off,
         ],
     );
-    kit.state.pads[0].macros[0] = normalize_linear(180.0, 80.0, 2000.0);
-    kit.state.pads[1].macros[0] = normalize_linear(500.0, 80.0, 2000.0);
-    kit.state.pads[2].macros[0] = normalize_linear(300.0, 80.0, 4000.0);
-    kit.state.pads[2].macros[1] = normalize_linear(2500.0, 500.0, 16000.0);
-    kit.state.pads[3].macros[0] = normalize_linear(5000.0, 1000.0, 16000.0);
+    kit.state.pads[0] = filter_config(FilterMode::LowPass, 180.0);
+    kit.state.pads[1] = filter_config(FilterMode::LowPass, 500.0);
+    kit.state.pads[2] = filter_config(FilterMode::BandPass, 1_400.0);
+    kit.state.pads[3] = filter_config(FilterMode::HighPass, 5_000.0);
     kit.state.pads[4].macros[0] = normalize_linear(16000.0, 1000.0, 44100.0);
     kit.state.pads[4].macros[1] = normalize_linear(12.0, 2.0, 16.0);
     kit.state.pads[5].macros[0] = normalize_linear(8000.0, 1000.0, 44100.0);
@@ -305,10 +310,11 @@ pub fn filter_pitch_kit() -> Kit {
     kit.state.pads[6].macros[1] = normalize_linear(50.0, 5.0, 95.0);
     kit.state.pads[7].macros[0] = grid_normalized(3);
     kit.state.pads[7].macros[1] = normalize_linear(25.0, 5.0, 95.0);
-    kit.state.pads[8].macros[0] = normalize_linear(1.0, 1.0, 24.0);
-    kit.state.pads[9].macros[0] = normalize_linear(7.0, 1.0, 24.0);
-    kit.state.pads[11].macros[0] = normalize_linear(1.0, 1.0, 24.0);
-    kit.state.pads[12].macros[0] = normalize_linear(7.0, 1.0, 24.0);
+    kit.state.pads[8] = pitch_config(PitchRole::Down, 1.0);
+    kit.state.pads[9] = pitch_config(PitchRole::Down, 7.0);
+    kit.state.pads[10] = pitch_config(PitchRole::Trigger, 1.0);
+    kit.state.pads[11] = pitch_config(PitchRole::Up, 1.0);
+    kit.state.pads[12] = pitch_config(PitchRole::Up, 7.0);
     kit.state.pads[13] = beat_repeat_config(2, 0);
     kit.state.pads[14].macros[0] = grid_normalized(4);
     kit
@@ -411,7 +417,7 @@ mod tests {
         assert_eq!(decoded.state.pads[0].effect_type, EffectType::Vinyl);
         assert_eq!(decoded.state.pads[3].macros, kit.state.pads[3].macros);
         let first_effect = 24 + kit.name.len() + 8;
-        bytes[first_effect..first_effect + 4].copy_from_slice(&13_u32.to_le_bytes());
+        bytes[first_effect..first_effect + 4].copy_from_slice(&11_u32.to_le_bytes());
         assert!(matches!(decode(&bytes), Err(DecodeError::InvalidEffect)));
     }
 

@@ -92,10 +92,12 @@ component BrutalButton inherits Rectangle {
 }
 
 component BrutalKnob inherits Rectangle {
-    in-out property <float> value: 0.0;
+    in property <float> value: 0.0;
     in property <string> value-text: "";
     in property <string> label: "";
     in property <bool> enabled: true;
+    in property <bool> interactive: true;
+    in property <bool> type-selector: false;
     callback edit-began();
     callback value-changed(float);
     callback edit-ended();
@@ -104,9 +106,9 @@ component BrutalKnob inherits Rectangle {
     min-height: 0px;
     preferred-width: 82px;
     preferred-height: 82px;
-    background: #0a0a0a;
-    border-width: 1px;
-    border-color: root.enabled ? #504f49 : #242424;
+    background: root.type-selector ? #eaff00 : #0a0a0a;
+    border-width: root.type-selector ? 3px : 1px;
+    border-color: root.type-selector ? #f2efe4 : root.enabled ? #504f49 : #242424;
     opacity: root.enabled ? 1.0 : 0.28;
 
     property <float> angle: 135 + root.value * 270;
@@ -120,7 +122,7 @@ component BrutalKnob inherits Rectangle {
         viewbox-y: 0;
         viewbox-width: 64;
         viewbox-height: 64;
-        stroke: #3e3e3a;
+        stroke: root.type-selector ? #9aaa00 : #3e3e3a;
         stroke-width: 5px;
 
         MoveTo { x: 32 + 27 * cos(135deg); y: 32 + 27 * sin(135deg); }
@@ -143,7 +145,7 @@ component BrutalKnob inherits Rectangle {
         viewbox-y: 0;
         viewbox-width: 64;
         viewbox-height: 64;
-        stroke: root.enabled ? #eaff00 : #3e3e3a;
+        stroke: root.type-selector ? #080808 : root.enabled ? #eaff00 : #3e3e3a;
         stroke-width: 5px;
 
         MoveTo { x: 32 + 27 * cos(135deg); y: 32 + 27 * sin(135deg); }
@@ -166,7 +168,7 @@ component BrutalKnob inherits Rectangle {
         viewbox-y: 0;
         viewbox-width: 64;
         viewbox-height: 64;
-        stroke: #f2efe4;
+        stroke: root.type-selector ? #080808 : #f2efe4;
         stroke-width: 2px;
 
         MoveTo { x: 32; y: 32; }
@@ -182,7 +184,7 @@ component BrutalKnob inherits Rectangle {
         width: parent.width - 6px;
         height: 15px;
         text: root.enabled ? root.value-text : "—";
-        color: root.enabled ? #f2efe4 : #6b6962;
+        color: root.type-selector ? #080808 : root.enabled ? #f2efe4 : #6b6962;
         font-size: 10px;
         font-weight: 700;
         horizontal-alignment: center;
@@ -195,7 +197,7 @@ component BrutalKnob inherits Rectangle {
         width: parent.width - 6px;
         height: 14px;
         text: root.enabled ? root.label : "INACTIVE";
-        color: root.enabled ? #eaff00 : #5a5852;
+        color: root.type-selector ? #080808 : root.enabled ? #eaff00 : #5a5852;
         font-size: 9px;
         font-weight: 800;
         horizontal-alignment: center;
@@ -203,7 +205,7 @@ component BrutalKnob inherits Rectangle {
     }
 
     touch := TouchArea {
-        enabled: root.enabled;
+        enabled: root.enabled && root.interactive;
         property <float> start-value: 0.0;
         property <bool> editing: false;
 
@@ -221,12 +223,11 @@ component BrutalKnob inherits Rectangle {
 
         moved => {
             if self.pressed && self.editing {
-                root.value = clamp(
+                root.value-changed(clamp(
                     self.start-value - (self.mouse-y - self.pressed-y) / 145px,
                     0.0,
                     1.0,
-                );
-                root.value-changed(root.value);
+                ));
             }
         }
     }
@@ -603,10 +604,8 @@ export component BufferUppercutUi inherits Window {
                     height: 82px;
                     value: root.pitch-value;
                     value-text: root.pitch-text;
-                    label: "PERF PITCH";
-                    edit-began => { root.pitch-edit-began(); }
-                    value-changed(value) => { root.pitch-value-changed(value); }
-                    edit-ended => { root.pitch-edit-ended(); }
+                    label: "ACTIVE SHIFT";
+                    interactive: false;
                 }
             }
         }
@@ -729,7 +728,8 @@ export component BufferUppercutUi inherits Window {
                             height: (parent.height - 7px) / 2;
                             value: root.effect-value;
                             value-text: root.effect-name;
-                            label: "EFFECT TYPE";
+                            label: "TYPE RESETS";
+                            type-selector: true;
                             edit-began => { root.effect-edit-began(); }
                             value-changed(value) => { root.effect-value-changed(value); }
                             edit-ended => { root.effect-edit-ended(); }

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Superseded in part by [ADR 0008](0008-unified-filter-effect.md).
 
 ## Context
 

@@ -3,8 +3,8 @@ mod midi;
 mod params;
 
 use buffer_uppercut_dsp::{
-    EffectType, Engine, NUM_MACROS, NUM_PADS, PadConfig, PerformanceState, VisualizationBin,
-    apply_pitch_action,
+    EffectType, Engine, NUM_MACROS, NUM_PADS, PadConfig, PerformanceState, PitchRole,
+    VisualizationBin, apply_pitch_action,
 };
 use truce::prelude64::*;
 
@@ -113,14 +113,25 @@ impl PluginLogic for BufferUppercut {
 
         let mut performance = performance_state(params, &state.held_pads_by_channel);
         let pitch_before_actions = state.performance_pitch;
-        for pad in 0..NUM_PADS {
-            if performance.held[pad] && !state.previous_held[pad] {
-                let config = &performance.pads[pad];
-                if config.effect_type.is_pitch_action() {
-                    state.performance_pitch =
-                        apply_pitch_action(state.performance_pitch, config.effect_type, config);
+        let pitch_trigger_held = (0..NUM_PADS).any(|pad| {
+            performance.held[pad]
+                && performance.pads[pad].effect_type == EffectType::Pitch
+                && PitchRole::from_normalized(performance.pads[pad].macros[0]) == PitchRole::Trigger
+        });
+        if pitch_trigger_held {
+            for pad in 0..NUM_PADS {
+                if performance.held[pad] && !state.previous_held[pad] {
+                    let config = &performance.pads[pad];
+                    if config.effect_type == EffectType::Pitch
+                        && PitchRole::from_normalized(config.macros[0]).is_action()
+                    {
+                        state.performance_pitch =
+                            apply_pitch_action(state.performance_pitch, config);
+                    }
                 }
             }
+        } else {
+            state.performance_pitch = 0.0;
         }
         if state.performance_pitch != pitch_before_actions {
             context.output_events.push(Event::new(
@@ -367,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn vinyl_wrapper_lifecycle_is_allocation_free() {
+    fn wrapper_effect_lifecycle_is_allocation_free() {
         let params = BufferUppercutParams::default();
         let kit = buffer_uppercut_kit::vinyl_cuts_kit();
         for pad in 0..7 {
@@ -408,6 +419,11 @@ mod tests {
                     params::pad_control_id(0, control),
                     if phase % 2 == 0 { 1.0 } else { 0.0 },
                 );
+            }
+            if phase == 6 {
+                params.set_plain(params::pad_type_id(0), EffectType::Pitch as u8 as f64);
+                params.set_plain(params::pad_control_id(0, 0), 0.5);
+                params.set_plain(params::pad_control_id(0, 6), 1.0);
             }
             let inputs = [&input[..], &input[..]];
             let mut outputs = [&mut left[..], &mut right[..]];
@@ -465,56 +481,53 @@ mod tests {
     }
 
     #[test]
-    fn midi_pitch_action_applies_once_on_the_held_transition() {
+    fn pitch_actions_accumulate_only_while_trigger_is_held_and_release_resets() {
         let params = BufferUppercutParams::default();
+        params.set_direct_keys_enabled(true);
         let mut state = BufferUppercut::default();
         <BufferUppercut as PluginLogic>::reset(
             &mut state,
             &params,
             &AudioConfig::new(48_000.0, 32),
         );
-        let input_l = [0.0; 32];
-        let input_r = [0.0; 32];
-        let mut output_l = [0.0; 32];
-        let mut output_r = [0.0; 32];
         let transport = TransportInfo::for_screenshot();
-        let mut output_events = EventList::with_capacity(1);
-        let mut events = EventList::with_capacity(1);
-        events.push(Event::new(
-            0,
-            EventBody::NoteOn {
-                group: 0,
-                channel: 3,
-                note: 69,
-                velocity: 100,
-            },
-        ));
-
-        for iteration in 0..2 {
+        let events = EventList::with_capacity(0);
+        let mut output_events = EventList::with_capacity(4);
+        let run_block = |state: &mut BufferUppercut, output_events: &mut EventList| {
+            let input_l = [0.25; 32];
+            let input_r = [0.25; 32];
+            let mut output_l = [0.0; 32];
+            let mut output_r = [0.0; 32];
             let input_refs = [&input_l[..], &input_r[..]];
             let mut output_refs = [&mut output_l[..], &mut output_r[..]];
             let mut buffer = AudioBuffer::from_slices_checked(&input_refs, &mut output_refs, 32);
-            let mut context = ProcessContext::new(&transport, 48_000.0, 32, &mut output_events);
+            let mut context = ProcessContext::new(&transport, 48_000.0, 32, output_events);
             <BufferUppercut as PluginLogic>::process(
-                &mut state,
+                state,
                 &params,
                 &mut buffer,
                 &events,
                 &mut context,
             );
-            assert_eq!(
-                params.get_plain(params::PARAM_PERFORMANCE_PITCH_ID),
-                Some(0.0),
-                "iteration {iteration}"
-            );
-            assert_eq!(state.performance_pitch, -1.0, "iteration {iteration}");
-        }
-        assert_eq!(output_events.len(), 1);
-        assert!(matches!(
-            output_events.get(0).map(|event| &event.body),
-            Some(EventBody::ParamChange { id, value })
-                if *id == params::PARAM_PERFORMANCE_PITCH_ID && *value == -1.0
-        ));
+        };
+
+        assert!(params.apply_direct_key(10, true, false));
+        assert!(params.apply_direct_key(9, true, false));
+        run_block(&mut state, &mut output_events);
+        assert_eq!(state.performance_pitch, -1.0);
+        run_block(&mut state, &mut output_events);
+        assert_eq!(state.performance_pitch, -1.0);
+
+        assert!(params.apply_direct_key(9, false, false));
+        run_block(&mut state, &mut output_events);
+        assert!(params.apply_direct_key(9, true, false));
+        run_block(&mut state, &mut output_events);
+        assert_eq!(state.performance_pitch, -2.0);
+
+        assert!(params.apply_direct_key(10, false, false));
+        run_block(&mut state, &mut output_events);
+        assert_eq!(state.performance_pitch, 0.0);
+        assert_eq!(output_events.len(), 3);
     }
 
     #[test]

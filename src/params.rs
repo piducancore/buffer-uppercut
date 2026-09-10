@@ -141,18 +141,8 @@ pub enum EffectType {
     #[name = "Tape Stop"]
     TapeStop,
     Gate,
-    #[name = "Pitch Down"]
-    PitchDown,
-    #[name = "Pitch Reset"]
-    PitchReset,
-    #[name = "Pitch Up"]
-    PitchUp,
-    #[name = "Low Band"]
-    LowBand,
-    #[name = "Mid Band"]
-    MidBand,
-    #[name = "High Band"]
-    HighBand,
+    Pitch,
+    Filter,
     LoFi,
     Vinyl,
 }
@@ -342,7 +332,7 @@ pad_params!(
         "Pad 9 Control 7"
     ],
     4,
-    [0.25, 0.47368421052631576, 1.0, 0.05, 0.01, 0.0, 0.0]
+    [0.25, 0.5, 1.0, 0.05, 0.01, 0.0, 0.0]
 );
 pad_params!(
     Pad10Params,
@@ -359,7 +349,15 @@ pad_params!(
         "Pad 10 Control 7"
     ],
     5,
-    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    [
+        0.0,
+        0.0,
+        0.3333333333333333,
+        0.2,
+        0.13559322033898305,
+        0.0,
+        1.0
+    ]
 );
 pad_params!(
     Pad11Params,
@@ -375,8 +373,16 @@ pad_params!(
         "Pad 11 Control 6",
         "Pad 11 Control 7"
     ],
-    6,
-    [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    5,
+    [
+        0.5,
+        0.0,
+        0.3333333333333333,
+        0.2,
+        0.13559322033898305,
+        0.0,
+        1.0
+    ]
 );
 pad_params!(
     Pad12Params,
@@ -392,8 +398,16 @@ pad_params!(
         "Pad 12 Control 6",
         "Pad 12 Control 7"
     ],
-    7,
-    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    5,
+    [
+        1.0,
+        0.0,
+        0.3333333333333333,
+        0.2,
+        0.13559322033898305,
+        0.0,
+        1.0
+    ]
 );
 pad_params!(
     Pad13Params,
@@ -409,8 +423,8 @@ pad_params!(
         "Pad 13 Control 6",
         "Pad 13 Control 7"
     ],
-    8,
-    [0.09375, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    6,
+    [0.0, 0.3713144507689456, 0.35, 0.2, 0.0, 0.0, 1.0]
 );
 pad_params!(
     Pad14Params,
@@ -426,16 +440,8 @@ pad_params!(
         "Pad 14 Control 6",
         "Pad 14 Control 7"
     ],
-    9,
-    [
-        0.04591836734693878,
-        0.2032258064516129,
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0
-    ]
+    6,
+    [0.5, 0.5927170834612147, 0.35, 0.2, 0.0, 0.0, 1.0]
 );
 pad_params!(
     Pad15Params,
@@ -451,8 +457,8 @@ pad_params!(
         "Pad 15 Control 6",
         "Pad 15 Control 7"
     ],
-    10,
-    [0.17333333333333334, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    6,
+    [1.0, 0.751757501701102, 0.35, 0.2, 0.0, 0.0, 1.0]
 );
 pad_params!(
     Pad16Params,
@@ -468,9 +474,9 @@ pad_params!(
         "Pad 16 Control 6",
         "Pad 16 Control 7"
     ],
-    11,
+    7,
     [
-        0.23356009070294784,
+        0.2325986078886311,
         0.42857142857142855,
         1.0,
         0.0,
@@ -868,12 +874,12 @@ mod tests {
     }
 
     #[test]
-    fn vinyl_is_the_thirteenth_host_choice_on_every_slot() {
+    fn vinyl_is_the_ninth_host_choice_on_every_slot() {
         let params = BufferUppercutParams::default();
         for pad in 0..NUM_PADS {
             let id = pad_type_id(pad);
-            for effect in 0..=12 {
-                params.set_normalized(id, effect as f64 / 12.0);
+            for effect in 0..=8 {
+                params.set_normalized(id, effect as f64 / 8.0);
                 assert_eq!(params.get_plain(id), Some(effect as f64));
             }
         }
@@ -884,11 +890,32 @@ mod tests {
     fn classic_defaults_are_preserved() {
         let params = BufferUppercutParams::default();
         assert_eq!(params.get_plain(pad_type_id(0)), Some(1.0));
-        assert_eq!(params.get_plain(pad_type_id(15)), Some(11.0));
+        assert_eq!(params.get_plain(pad_type_id(15)), Some(7.0));
         assert_eq!(params.get_plain(pad_control_id(0, 0)), Some(0.25));
         assert_eq!(
             params.get_plain(pad_control_id(4, 1)),
             Some(0.6666666666666666)
         );
+    }
+
+    #[test]
+    fn fresh_host_parameters_match_every_classic_kit_control() {
+        let params = BufferUppercutParams::default();
+        let kit = buffer_uppercut_kit::classic_kit();
+        for (pad, config) in kit.state.pads.iter().enumerate() {
+            assert_eq!(
+                params.get_plain(pad_type_id(pad)),
+                Some(config.effect_type as u8 as f64)
+            );
+            for (control, expected) in config.macros.iter().enumerate() {
+                let actual = params.get_plain(pad_control_id(pad, control)).unwrap();
+                assert!(
+                    (actual - expected).abs() < 1e-12,
+                    "pad {} control {}: host={actual}, kit={expected}",
+                    pad + 1,
+                    control + 1
+                );
+            }
+        }
     }
 }
