@@ -17,7 +17,9 @@ name = "buffer-uppercut-standalone"
 path = "src/main.rs"
 required-features = ["standalone"]
 
-# Scaffolded default: CLAP + VST3 + standalone. To add LV2 / AU / AAX / VST2,
+# The default feature set includes the development-only standalone host so local
+# `cargo truce run` and all-feature CI keep exercising it. Public releases contain
+# CLAP and VST3 only. To add LV2 / AU / AAX / VST2,
 # add the matching feature + optional dep below (e.g.
 # `lv2 = ["dep:truce-lv2"]` +
 # `truce-lv2 = { version = "6.3", optional = true }`).

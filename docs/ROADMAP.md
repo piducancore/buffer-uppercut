@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-09-09.
+Last updated: 2026-09-10.
 
 This file tracks current product status. Architectural rationale belongs in
 `adr/`; durable behavior belongs in `CONTRACTS.md`.
@@ -17,7 +17,8 @@ This file tracks current product status. Architectural rationale belongs in
 - TRUCE 6.3 is the sole canonical framework.
 - Slint 1.15.1 is the sole editor implementation.
 - Product identity is **Buffer Uppercut**, not a preview or comparison build.
-- CLAP, VST3, and standalone targets build.
+- CLAP and VST3 are the supported product formats. The standalone target builds
+  as a development host and is excluded from distribution.
 - The framework-neutral `f64` DSP implements every current effect as an
   independent per-slot processor in a deterministic ascending-slot serial chain.
 - Filter uses one bounded nonlinear resonant state-variable processor with
@@ -33,7 +34,8 @@ This file tracks current product status. Architectural rationale belongs in
   unchanged.
 - MIDI, automation, pointer input, and the physical `1234/QWER/ASDF/ZXCV`
   performance layout aggregate without one source releasing another.
-- Direct keys are opt-in for CLAP/VST3 and enabled by default in standalone.
+- Direct keys are opt-in for CLAP/VST3 and enabled by default in the standalone
+  development host.
 - Host tempo, automation, host-native preset recall, semantic macro values,
   factory kits, the native kit codec, and the stereo performance waveform are
   implemented.
@@ -47,7 +49,11 @@ This file tracks current product status. Architectural rationale belongs in
 - The current serial build loads in macOS REAPER; MIDI and focused direct-key
   performance have been confirmed in the installed plugin.
 - Linux, Windows, and macOS CI cover formatting, Clippy, contract tests,
-  `rt-paranoid`, CLAP/VST3/standalone builds, and headless validators.
+  `rt-paranoid`, CLAP/VST3 builds, the standalone development-host build, and
+  headless validators.
+- A tag/manual workflow packages `not-for-distribution` CLAP/VST3 candidates
+  with checksums into a draft GitHub release; candidates cannot be refreshed
+  after a release is published.
 - Archived C++/WRAC state, preset, ID, and source compatibility are explicitly
   out of scope.
 
@@ -72,7 +78,8 @@ This file tracks current product status. Architectural rationale belongs in
 - Complete the full REAPER checklist for serial stacking, same-type stages,
   six-stage suspend/restore, release/repress history, and final **Buffer
   Uppercut** identity.
-- Verify the direct-key opt-in/default policy in CLAP, VST3, and standalone.
+- Verify the direct-key opt-in/default policy in CLAP, VST3, and the standalone
+  development host.
 - Verify physical-position mapping on at least one non-US keyboard layout and
   confirm disabled/unmapped keys remain available to the host.
 - Measure activation memory at supported sample rates and record controlled CPU
@@ -95,7 +102,11 @@ This file tracks current product status. Architectural rationale belongs in
 - Additional factory kits and kit-management workflow.
 - Expanded visualization or spectrum analysis.
 - Preset browser and tagging.
-- Release signing, notarization, packaging, and update distribution.
+- Add macOS and Windows signing and macOS notarization to the CLAP/VST3 release
+  workflow; replace its not-for-distribution archives after credentials are
+  available.
+- Define standalone audio-input, monitoring, and no-input behavior before
+  reconsidering it as a distributed product.
 - Additional plugin formats after CI and real-host validation.
 
 ## Explicitly not planned

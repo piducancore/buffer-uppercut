@@ -34,3 +34,6 @@ Current records:
 - [0009 — Pitch uses held grain processing with action roles](0009-held-grain-pitch.md)
   governs Pitch roles and controls, active-shift gestures, current effect
   numbering, and the v4 DSP corpus.
+- [0010 — Standalone remains a development host](0010-standalone-development-host.md)
+  keeps standalone compilation and testing without making it a distributed
+  product format.

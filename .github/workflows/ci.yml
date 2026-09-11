@@ -75,7 +75,7 @@ jobs:
       - name: Check audio-thread allocations
         run: cargo test --locked --workspace --features rt-paranoid
 
-      - name: Build CLAP, VST3, and standalone artifacts
+      - name: Build CLAP/VST3 artifacts and standalone development host
         run: |
           cargo truce build --clap --vst3
           cargo build --locked --release --bin buffer-uppercut-standalone

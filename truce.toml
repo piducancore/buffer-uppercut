@@ -1,5 +1,5 @@
 [vendor]
-name = "PiducanCore"
+name = "piducancore"
 id = "com.piducancore"
 url = "https://github.com/piducancore/buffer-uppercut"
 au_manufacturer = "Pidu"

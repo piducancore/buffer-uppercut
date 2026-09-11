@@ -11,8 +11,9 @@ cargo test --locked --workspace
 cargo truce run
 ```
 
-The standalone app is the fastest way to inspect UI and DSP behavior. Use its
-audio and MIDI menus to select devices.
+The development-only standalone host is the fastest way to inspect UI and DSP
+behavior. Use its audio and MIDI menus to select devices. It is compiled in CI
+but is not packaged, signed, advertised, or supported as a product format.
 
 Before handing off:
 
@@ -109,11 +110,31 @@ cargo truce build --clap --vst3
 cargo truce install --clap --vst3
 ```
 
-The standalone release binary is:
+The standalone development binary is:
 
 ```sh
 cargo build --locked --release --bin buffer-uppercut-standalone
 ```
+
+Do not add it to release archives until its audio-input, monitoring, and
+no-input behavior have been specified through an accepted ADR.
+
+## Release candidates
+
+`.github/workflows/release.yml` packages CLAP and VST3 from an existing `v*`
+tag on Linux, Windows, and macOS. It verifies that the tag matches the root
+crate version, runs the blocking automated checks, creates checksums, and
+creates or refreshes a draft GitHub release.
+
+The current archives are explicitly named `not-for-distribution` and must remain
+drafts. Do not publish them. TRUCE gives locally built macOS bundles an ad-hoc
+signature, which is not a Developer ID distribution signature; Windows and Linux
+also lack their final release trust chain. Replace the candidate packaging stages
+with verified macOS Developer ID signing and notarization plus Windows
+Authenticode signing before the first public release. Signing credentials belong
+in the protected GitHub `release` environment, never in repository files or
+ordinary workflow output. Configure that environment in repository settings with
+required reviewers before using the workflow for release credentials.
 
 ### Shell reload
 

@@ -1,0 +1,157 @@
+name: Release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to package, for example v0.1.0
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libfontconfig-dev \
+            libgl1-mesa-dev \
+            libudev-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev
+      - name: Verify tag matches crate version
+        run: |
+          crate_version="$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json, sys; data=json.load(sys.stdin); print(next(package["version"] for package in data["packages"] if package["name"] == "buffer-uppercut"))')"
+          test "$RELEASE_TAG" = "v$crate_version"
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --workspace
+      - run: cargo test --locked --workspace --features rt-paranoid
+
+  build:
+    needs: verify
+    name: Build ${{ matrix.slug }} candidate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            slug: linux-x64
+          - os: windows-2022
+            slug: windows-x64
+          - os: macos-14
+            slug: macos
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libfontconfig-dev \
+            libgl1-mesa-dev \
+            libudev-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            zip
+      - name: Install TRUCE build tool
+        run: cargo install cargo-truce --version 6.3.0 --locked
+      - name: Build CLAP and VST3
+        run: cargo truce build --clap --vst3
+      - name: Stage plugin bundles
+        run: |
+          mkdir -p "dist/Buffer Uppercut"
+          cp -R "target/bundles/Buffer Uppercut.clap" "dist/Buffer Uppercut/"
+          cp -R "target/bundles/Buffer Uppercut.vst3" "dist/Buffer Uppercut/"
+      - name: Package macOS candidate
+        if: runner.os == 'macOS'
+        run: |
+          archive="Buffer-Uppercut-${RELEASE_TAG#v}-${{ matrix.slug }}-not-for-distribution.zip"
+          ditto -c -k --sequesterRsrc --keepParent "dist/Buffer Uppercut" "dist/$archive"
+      - name: Package Linux candidate
+        if: runner.os == 'Linux'
+        run: |
+          archive="Buffer-Uppercut-${RELEASE_TAG#v}-${{ matrix.slug }}-not-for-distribution.zip"
+          (cd dist && zip -qry "$archive" "Buffer Uppercut")
+      - name: Package Windows candidate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_TAG.TrimStart('v')
+          $archive = "dist/Buffer-Uppercut-$version-${{ matrix.slug }}-not-for-distribution.zip"
+          Compress-Archive -Path "dist/Buffer Uppercut" -DestinationPath $archive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.slug }}
+          path: dist/*-not-for-distribution.zip
+          if-no-files-found: error
+
+  draft-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        run: (cd dist && sha256sum *-not-for-distribution.zip > SHA256SUMS)
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = "true"
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/* \
+              --draft \
+              --generate-notes \
+              --title "Buffer Uppercut ${RELEASE_TAG#v} — NOT FOR DISTRIBUTION" \
+              --verify-tag
+          fi

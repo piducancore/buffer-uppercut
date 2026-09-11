@@ -274,7 +274,7 @@ remain on the checklist.
    released-to-held edge; release the final Trigger and verify reset to zero.
 6. Test one non-US keyboard layout and confirm the physical positions do not
    move with produced characters.
-7. In standalone, verify direct keys are enabled by default.
+7. In the standalone development host, verify direct keys are enabled by default.
 8. Disable direct keys again and confirm host keyboard behavior returns.
 
 ### MIDI

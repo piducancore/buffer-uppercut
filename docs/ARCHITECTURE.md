@@ -145,10 +145,10 @@ These positions map to slots 1 through 16 row by row. The mapping is physical,
 not dependent on the character produced by the active keyboard layout. The
 editor exposes it as **DIRECT KEYS**. It is opt-in for CLAP and VST3 instances
 so DAW shortcuts and host virtual MIDI keyboards remain available by default.
-Standalone mode enables it by default. MIDI, automation, and pointer input
-remain available in every target. Framework support for physical identity
-remains generic; product mapping belongs in the Buffer Uppercut integration
-layer, not `vendor/truce-slint`.
+The development-only standalone host enables it by default. MIDI, automation,
+and pointer input remain available in every target. Framework support for
+physical identity remains generic; product mapping belongs in the Buffer
+Uppercut integration layer, not `vendor/truce-slint`.
 
 ## Parameters and host state
 

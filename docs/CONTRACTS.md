@@ -7,10 +7,11 @@ through an explicit code, test, documentation, and ADR update.
 ## Product identity
 
 - Display name: `Buffer Uppercut`
-- Vendor: `PiducanCore`
+- Vendor: `piducancore`
 - Package/crate: `buffer-uppercut`
 - Bundle slug: `buffer-uppercut`
-- Formats currently built: CLAP, VST3, standalone
+- Supported product formats: CLAP and VST3
+- Development host: standalone executable, compiled in CI but not distributed
 - Plugin kind: stereo/mono audio effect with MIDI input
 
 Identity is defined in `truce.toml`; do not duplicate it in source code.
@@ -33,17 +34,17 @@ macro n = trigger + 2 + n, n in 0..6
 
 Effect type values are:
 
-| Value | Effect |
-| ---: | --- |
-| 0 | Off |
-| 1 | Beat Repeat |
-| 2 | Reverse |
-| 3 | Tape Stop |
-| 4 | Gate |
-| 5 | Pitch |
-| 6 | Filter |
-| 7 | LoFi |
-| 8 | Vinyl |
+| Value | Effect      |
+| ----: | ----------- |
+|     0 | Off         |
+|     1 | Beat Repeat |
+|     2 | Reverse     |
+|     3 | Tape Stop   |
+|     4 | Gate        |
+|     5 | Pitch       |
+|     6 | Filter      |
+|     7 | LoFi        |
+|     8 | Vinyl       |
 
 Macro parameters remain normalized for the host. The UI formats them
 semantically as grid divisions, percentages, semitones, decibels, milliseconds,
@@ -61,15 +62,15 @@ filter pads.
 
 Pitch is one effect at value 5 with seven normalized controls:
 
-| Macro | Behavior |
-| --- | --- |
-| Role | Down at 0, Trigger at 0.5, Up at 1 |
-| Step | 1–24 semitones per new action press |
-| Grain | 12–120 ms grain window |
-| Texture | Deterministic read-position movement |
-| Smooth | 2–120 ms shift smoothing |
-| Feedback | Bounded grain feedback |
-| Wet | Local Trigger-stage dry/effect blend |
+| Macro    | Behavior                             |
+| -------- | ------------------------------------ |
+| Role     | Down at 0, Trigger at 0.5, Up at 1   |
+| Step     | 1–24 semitones per new action press  |
+| Grain    | 12–120 ms grain window               |
+| Texture  | Deterministic read-position movement |
+| Smooth   | 2–120 ms shift smoothing             |
+| Feedback | Bounded grain feedback               |
+| Wet      | Local Trigger-stage dry/effect blend |
 
 Only a held Trigger role enters the serial audio chain. While at least one
 Trigger is held, each new Down or Up press subtracts or adds that action pad's
@@ -112,15 +113,15 @@ decision is recorded in [ADR 0008](adr/0008-unified-filter-effect.md).
 
 Vinyl is an original record-wear simulation with seven normalized controls:
 
-| Macro | Behavior |
-| --- | --- |
-| Wow | Slow pitch drift; squared depth, up to 6 ms delay excursion |
-| Flutter | Faster pitch instability; squared depth, up to 0.35 ms excursion |
-| Wear | Blends toward a low-pass tone whose cutoff falls from 20 kHz to 1.8 kHz |
-| Drive | 0–18 dB into a blended, gain-compensated soft saturation |
-| Dust | Sparse bipolar clicks, up to 30 events/second per channel |
-| Noise | Colored surface noise; squared level response |
-| Wet | Local stage dry/effect blend |
+| Macro   | Behavior                                                                |
+| ------- | ----------------------------------------------------------------------- |
+| Wow     | Slow pitch drift; squared depth, up to 6 ms delay excursion             |
+| Flutter | Faster pitch instability; squared depth, up to 0.35 ms excursion        |
+| Wear    | Blends toward a low-pass tone whose cutoff falls from 20 kHz to 1.8 kHz |
+| Drive   | 0–18 dB into a blended, gain-compensated soft saturation                |
+| Dust    | Sparse bipolar clicks, up to 30 events/second per channel               |
+| Noise   | Colored surface noise; squared level response                           |
+| Wet     | Local stage dry/effect blend                                            |
 
 Wow combines 0.55 and 0.83 Hz oscillators; Flutter uses 8.7 Hz. Stereo channels
 share the same modulated delay position. The causal delay spans 0–12.7 ms at
@@ -161,24 +162,24 @@ holds it. Pitch actions occur once per aggregate released-to-held transition.
 Hosts disagree about octave labels, so product documentation uses MIDI note
 numbers:
 
-| Note | Slot/action |
-| ---: | --- |
-| 60 | Slot 1: stutter |
-| 61 | Slot 2: half-beat repeat |
-| 62 | Slot 3: one-beat repeat |
-| 63 | Slot 4: buzz |
-| 64 | Slot 5: cell from two beats back |
-| 65 | Slot 6: cell from four beats back |
-| 66 | Slot 7: reverse |
-| 67 | Slot 8: tape stop |
-| 68 | Slot 9: gate |
-| 69 | Slot 10: Pitch, Down role |
-| 70 | Slot 11: Pitch, Trigger role |
-| 71 | Slot 12: Pitch, Up role |
-| 72 | Slot 13: Filter, Low-pass at 260 Hz |
-| 73 | Slot 14: Filter, Band-pass at 1.2 kHz |
-| 74 | Slot 15: Filter, High-pass at 3.6 kHz |
-| 75 | Slot 16: LoFi |
+| Note | Slot/action                           |
+| ---: | ------------------------------------- |
+|   60 | Slot 1: stutter                       |
+|   61 | Slot 2: half-beat repeat              |
+|   62 | Slot 3: one-beat repeat               |
+|   63 | Slot 4: buzz                          |
+|   64 | Slot 5: cell from two beats back      |
+|   65 | Slot 6: cell from four beats back     |
+|   66 | Slot 7: reverse                       |
+|   67 | Slot 8: tape stop                     |
+|   68 | Slot 9: gate                          |
+|   69 | Slot 10: Pitch, Down role             |
+|   70 | Slot 11: Pitch, Trigger role          |
+|   71 | Slot 12: Pitch, Up role               |
+|   72 | Slot 13: Filter, Low-pass at 260 Hz   |
+|   73 | Slot 14: Filter, Band-pass at 1.2 kHz |
+|   74 | Slot 15: Filter, High-pass at 3.6 kHz |
+|   75 | Slot 16: LoFi                         |
 
 The three Pitch roles also accept `57..59` and `81..83`. MIDI held state is
 independent for all 16 MIDI channels before channel masks are aggregated.
@@ -187,17 +188,18 @@ The direct computer-key layout follows physical positions, not layout-produced
 characters:
 
 | Slots | Physical key positions |
-| --- | --- |
-| 1–4 | `1` `2` `3` `4` |
-| 5–8 | `Q` `W` `E` `R` |
-| 9–12 | `A` `S` `D` `F` |
-| 13–16 | `Z` `X` `C` `V` |
+| ----- | ---------------------- |
+| 1–4   | `1` `2` `3` `4`        |
+| 5–8   | `Q` `W` `E` `R`        |
+| 9–12  | `A` `S` `D` `F`        |
+| 13–16 | `Z` `X` `C` `V`        |
 
 The editor control is labeled **DIRECT KEYS**. It is runtime editor state, not
 one of the 145 host parameters. It is disabled by default for CLAP and VST3
-instances and enabled by default in standalone. Disabling it, or pressing an
-unmapped key, must leave host/DAW keyboard handling available. MIDI, automation,
-and pointer operation remain supported in every target.
+instances and enabled by default in the standalone development host. Disabling
+it, or pressing an unmapped key, must leave host/DAW keyboard handling
+available. MIDI, automation, and pointer operation remain supported in every
+target.
 
 ## Event timing
 
@@ -258,18 +260,18 @@ allocates in `process`.
 
 ## Runtime lifecycle
 
-| Event | Processor state | Buffer history | Held/admission state |
-| --- | --- | --- | --- |
-| suspension at the cap | freeze | configured buffer keeps recording and advancing | remains held and suspended |
-| restoration from suspension | resume frozen state | continuous, current lookback | active again |
-| aggregate release | reset that slot's processor | configured buffer keeps recording | remove from active/suspended admission |
-| next press after release | start reset processor | use continuously recorded history | request admission |
-| buffer-to-buffer type change | reset for new type | preserve | retain or resolve admission from aggregate hold |
-| non-buffer-to-buffer type change | reset for new type | clear and start cold | retain or resolve admission from aggregate hold |
-| plugin/DSP activation or reset | reset all processors | clear all rolling and slot histories | clear all held/admission state |
-| kit application/reset | reset all processors | clear all rolling and slot histories | release every input source and clear admission |
-| host state restoration | reset all processors | clear all rolling and slot histories | release every input source and clear admission |
-| transport start/stop/seek/tempo/position change | preserve | preserve | preserve |
+| Event                                           | Processor state             | Buffer history                                  | Held/admission state                            |
+| ----------------------------------------------- | --------------------------- | ----------------------------------------------- | ----------------------------------------------- |
+| suspension at the cap                           | freeze                      | configured buffer keeps recording and advancing | remains held and suspended                      |
+| restoration from suspension                     | resume frozen state         | continuous, current lookback                    | active again                                    |
+| aggregate release                               | reset that slot's processor | configured buffer keeps recording               | remove from active/suspended admission          |
+| next press after release                        | start reset processor       | use continuously recorded history               | request admission                               |
+| buffer-to-buffer type change                    | reset for new type          | preserve                                        | retain or resolve admission from aggregate hold |
+| non-buffer-to-buffer type change                | reset for new type          | clear and start cold                            | retain or resolve admission from aggregate hold |
+| plugin/DSP activation or reset                  | reset all processors        | clear all rolling and slot histories            | clear all held/admission state                  |
+| kit application/reset                           | reset all processors        | clear all rolling and slot histories            | release every input source and clear admission  |
+| host state restoration                          | reset all processors        | clear all rolling and slot histories            | release every input source and clear admission  |
+| transport start/stop/seek/tempo/position change | preserve                    | preserve                                        | preserve                                        |
 
 Activation means plugin or DSP activation/reset, not admission of a held slot.
 Restoring a suspended slot therefore does not clear history or restart its

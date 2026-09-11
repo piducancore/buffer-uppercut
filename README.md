@@ -10,7 +10,7 @@ It provides:
 
 - 16 momentary performance pads driven by the UI, automation, or MIDI notes
   60–75, plus an opt-in physical computer-key layout in plugins and a
-  default-on layout in standalone;
+  default-on layout in the standalone development host;
 - beat repeat, reverse, tape stop, gate, a held grain Pitch with Down/Up action
   roles, a multimode Filter, LoFi, and Vinyl record-wear effects;
 - deterministic serial stacking in ascending slot order, including repeated
@@ -23,7 +23,7 @@ It provides:
   codec;
 - host tempo, automation, state recall, MIDI illumination, and MIDI
   auto-selection;
-- CLAP, VST3, and standalone targets;
+- CLAP and VST3 plugin targets, plus a development-only standalone host;
 - a framework-neutral planar `f64` DSP core with allocation-free processing
   after activation.
 
@@ -69,6 +69,10 @@ Artifacts are written to `target/bundles/`. On macOS the installed bundles are:
 
 Quit and reopen the DAW after installing because hosts commonly retain loaded
 plugin binaries for the process lifetime.
+
+The standalone target is an internal development host for inspecting the UI,
+DSP, audio-device input, and MIDI without a DAW. It is compiled in CI but is not
+a supported or distributed product format.
 
 ## Verify
 
