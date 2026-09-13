@@ -121,6 +121,12 @@ no-input behavior have been specified through an accepted ADR.
 
 ## Release candidates
 
+Successful Windows CI jobs also upload a 14-day unsigned test ZIP containing
+CLAP, VST3, and installation instructions. Download the artifact from the run's
+Actions page for controlled private testing. Standalone is not included. These
+artifacts are separate from public releases and are uploaded only after the
+Windows validators pass.
+
 `.github/workflows/release.yml` packages CLAP and VST3 from an existing `v*`
 tag on Linux, Windows, and macOS. It verifies that the tag matches the root
 crate version, runs the blocking automated checks, creates checksums, and

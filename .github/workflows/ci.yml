@@ -113,6 +113,26 @@ jobs:
             cargo truce validate --clap --pluginval --skip-gui-tests
           fi
 
+      - name: Package unsigned Windows plugins for private testing
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $stage = "target/test-packages/Buffer Uppercut"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Recurse "target/bundles/Buffer Uppercut.vst3" $stage
+          Copy-Item -Recurse "target/bundles/Buffer Uppercut.clap" $stage
+          Copy-Item "docs/WINDOWS-TEST-INSTALL.txt" "$stage/INSTALL.txt"
+          Compress-Archive -Path $stage -DestinationPath "target/test-packages/Buffer-Uppercut-windows-x64-unsigned.zip"
+
+      - name: Upload unsigned Windows test package
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Buffer-Uppercut-windows-x64-unsigned
+          path: target/test-packages/Buffer-Uppercut-windows-x64-unsigned.zip
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Publish deterministic DSP benchmark
         if: runner.os == 'macOS'
         run: cargo run --locked -p buffer-uppercut-dsp --release --example benchmark

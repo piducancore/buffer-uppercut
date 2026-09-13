@@ -1,0 +1,29 @@
+Buffer Uppercut - Windows x64 private test build
+
+This build is unsigned and intended for trusted testers, not a public release.
+It contains CLAP and VST3 plugins, not a standalone application.
+
+ABLETON LIVE (10.1 or newer)
+
+1. Close Ableton Live.
+2. Extract this ZIP. Do not run the plugin directly from inside the ZIP.
+3. Copy the COMPLETE "Buffer Uppercut.vst3" folder into:
+   C:\Program Files\Common Files\VST3\
+   Windows may request administrator permission for this copy.
+   Keep the bundle's internal folders and files intact.
+4. Open Live. In Settings/Preferences > Plug-Ins, enable the VST3 system folder
+   and rescan. Buffer Uppercut should appear in the plug-in browser.
+5. Insert it as an AUDIO EFFECT after an instrument or on an audio track.
+   Play some audio, open the editor, and hold a performance pad with the mouse.
+   The effect is dry when no pad is held.
+6. To use the physical 1-4/QWER/ASDF/ZXCV performance keys, enable DIRECT KEYS
+   in the plugin editor and keep that editor focused. This is off by default
+   to leave Ableton shortcuts available.
+
+Ableton uses the VST3 bundle; the CLAP plugin is included for other CLAP hosts.
+If security software blocks the build, stop and ask the person who supplied it.
+Do not disable antivirus or Windows protections globally.
+
+To update or uninstall, close Live before replacing or removing the complete
+Buffer Uppercut.vst3 folder. Test in a disposable project at low monitoring
+volume and report your Live version, Windows version, and any errors.
