@@ -37,3 +37,5 @@ Current records:
 - [0010 — Standalone remains a development host](0010-standalone-development-host.md)
   keeps standalone compilation and testing without making it a distributed
   product format.
+- [0011 — Static product website alongside the plugin](0011-static-product-website.md)
+  governs Astro, GitHub Pages and release-backed public downloads.

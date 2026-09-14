@@ -100,6 +100,10 @@ BUFFER_UPPERCUT_EDITOR_PREVIEW=captured cargo truce screenshot --out screenshots
 
 ## Documentation
 
+The Astro product website lives in [site/](site/README.md). Its static build is
+deployed to GitHub Pages independently of plugin builds; binaries remain in
+GitHub Releases.
+
 - [Architecture](docs/ARCHITECTURE.md): system boundaries and runtime flows
 - [Contracts](docs/CONTRACTS.md): parameters, MIDI, realtime, kits, and state
 - [Development](docs/DEVELOPMENT.md): common implementation workflows

@@ -1,0 +1,64 @@
+name: Website
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', 'screenshots/**', '.github/workflows/pages.yml']
+  pull_request:
+    paths: ['site/**', 'screenshots/**', '.github/workflows/pages.yml']
+  release:
+    types: [published, edited, deleted]
+  workflow_dispatch:
+  # Also catches releases created with GITHUB_TOKEN, which do not trigger
+  # another workflow's release event. Manual dispatch updates immediately.
+  schedule:
+    - cron: '23 6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-${{ github.event_name == 'pull_request' && github.event.number || 'pages' }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && 'main' || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+        env:
+          RELEASES_SOURCE: ${{ github.event_name != 'pull_request' && 'github' || 'offline' }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: npm run test:build
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
+        with:
+          path: site/dist
+
+  deploy:
+    if: github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - uses: actions/deploy-pages@v4
+        id: deployment

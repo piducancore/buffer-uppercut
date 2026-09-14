@@ -1,0 +1,19 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+<Layout title="Installation">
+  <div class="page-heading"><p class="eyebrow">SETUP / FIRST PLAY</p><h1>Into your DAW<span class="accent">.</span></h1><p class="lead">Buffer Uppercut is an audio effect, not an instrument. It needs audio on its input.</p></div>
+  <div class="prose">
+    <section><h2>1. Install the plugin</h2><p>Download the package for your OS and architecture, extract the ZIP, and close your DAW. Keep the entire VST3 bundle intact; do not copy only the binary inside it.</p>
+      <h3>Windows</h3><p>Copy <code>Buffer Uppercut.vst3</code> into <code>C:\Program Files\Common Files\VST3\</code>. For a CLAP-compatible host, use <code>C:\Program Files\Common Files\CLAP\</code> for the CLAP file. These folders may require administrator permission.</p><p>In Ableton Live, enable VST3 system folders under plug-in preferences and rescan. Use the VST3 version.</p>
+      <h3>macOS</h3><p>Copy the VST3 bundle into <code>~/Library/Audio/Plug-Ins/VST3/</code>, or the CLAP bundle into <code>~/Library/Audio/Plug-Ins/CLAP/</code>. Unsigned previews may be blocked by macOS or the host. If blocked, stop and report the message; do not disable Gatekeeper globally.</p>
+      <h3>Linux</h3><p>Use your host’s configured scan directories, commonly <code>~/.vst3/</code> and <code>~/.clap/</code>. Check the release notes for distribution and runtime library requirements. Linux host compatibility still needs real-DAW validation; do not assume every host supports CLAP or VST3.</p>
+    </section>
+    <section><h2>2. Send it some audio</h2><p>Reopen and rescan your DAW. Add Buffer Uppercut as an insert on an audio track with a playing clip or monitored input. Begin at low monitoring volume. With no pads held, audio passes through dry.</p></section>
+    <section><h2>3. Hold a pad</h2><p>Press and hold a pad in the editor, or route MIDI notes 60–75 to the effect. Release to stop that trigger. MIDI routing depends on your DAW.</p><p>For computer-key performance, enable <strong>DIRECT KEYS</strong> and focus the editor. It is off by default so normal DAW shortcuts remain available.</p><pre class="keys" aria-label="Physical performance key layout">1 2 3 4
+Q W E R
+A S D F
+Z X C V</pre><p>The Classic kit puts Pitch Down, Trigger and Up on S, D and F. Hold D, then tap S or F to change pitch. Releasing D resets the active shift.</p></section>
+    <section class="notice"><h2>Testing a preview?</h2><p>Keep a backup of your project. Release notes document known limitations and minimum requirements. Signing status is not a promise of stability, and a checksum is not a publisher signature.</p><a href="https://github.com/piducancore/buffer-uppercut/issues">Report your OS, DAW, version and the exact error ↗</a></section>
+  </div>
+</Layout>

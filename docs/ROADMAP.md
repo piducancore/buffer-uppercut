@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-09-10.
+Last updated: 2026-09-14.
 
 This file tracks current product status. Architectural rationale belongs in
 `adr/`; durable behavior belongs in `CONTRACTS.md`.
@@ -56,6 +56,9 @@ This file tracks current product status. Architectural rationale belongs in
   after a release is published.
 - Archived C++/WRAC state, preset, ID, and source compatibility are explicitly
   out of scope.
+- The Astro product website in `site/` uses GitHub Actions-based Pages
+  publishing at `https://piducan.dev/buffer-uppercut/`. The canonical repository
+  is public; the download page excludes internal candidates and draft releases.
 
 ## Next: serial release sign-off
 
@@ -94,6 +97,9 @@ This file tracks current product status. Architectural rationale belongs in
   baseline.
 
 ## Candidate product work
+
+- Add distributable unsigned preview packaging and release notes before the
+  website can offer public downloads; existing candidates remain internal.
 
 - Sample-accurate event segmentation.
 - User-remappable direct-key layouts after the physical default is validated.

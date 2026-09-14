@@ -43,6 +43,7 @@ dependencies.
 | `src/editor.rs` | host automation gestures, direct-key adapter, factory-kit application, waveform path construction | audio processing, file dialogs |
 | `ui/` | Slint components, visual hierarchy, responsive layout | plugin or DSP logic |
 | `vendor/` | documented narrow framework backports | product behavior |
+| `site/` | Astro static product pages, build-time release metadata, installation guidance | plugin logic, runtime API server, binary storage |
 
 ## Audio processing flow
 
