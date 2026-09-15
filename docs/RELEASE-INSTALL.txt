@@ -1,0 +1,34 @@
+Buffer Uppercut - unsigned preview
+
+This is an audio effect: feed audio into it in a CLAP/VST3-compatible DAW.
+Standalone is not included. Use test projects and low monitoring volume.
+See RELEASE-NOTES.md for this version's architecture, runtime requirements,
+known limitations and recorded validation. LICENSE covers original project
+code; THIRDPARTY.json preserves separate dependency notices.
+
+Close the DAW before copying bundles. Keep the entire VST3 bundle intact.
+
+Windows:
+  VST3: C:\Program Files\Common Files\VST3\
+  CLAP: C:\Program Files\Common Files\CLAP\
+  System directories may require administrator permission. In Ableton Live,
+  use VST3, enable its system folders and rescan.
+
+macOS:
+  VST3: ~/Library/Audio/Plug-Ins/VST3/
+  CLAP: ~/Library/Audio/Plug-Ins/CLAP/
+  Ad-hoc signatures are not Developer ID signing or notarization. Your host
+  or macOS may block the preview; report the exact message if that happens.
+
+Linux:
+  Common scan directories: ~/.vst3/ and ~/.clap/
+  Use your DAW's configured locations. Check distribution/runtime requirements
+  and confirmed host compatibility in RELEASE-NOTES.md.
+
+Reopen/rescan the DAW and insert the effect on a track with playing audio.
+With no pads held, audio passes through dry. Hold an editor pad, or route MIDI
+notes 60-75 to the effect. DIRECT KEYS is opt-in; focus the editor to use it.
+
+Do not disable antivirus or system-wide OS security protections to install.
+SHA256SUMS verifies file integrity; it is not a publisher signature.
+Report issues: https://github.com/piducancore/buffer-uppercut/issues

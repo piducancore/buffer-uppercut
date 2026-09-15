@@ -1,7 +1,8 @@
 [package]
 name = "buffer-uppercut"
-version = "0.1.0"
+version = "0.1.0-preview.1"
 edition = "2024"
+license = "MIT"
 
 [workspace]
 members = [".", "dsp", "kit", "vendor/truce-slint"]

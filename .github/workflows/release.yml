@@ -1,10 +1,10 @@
-name: Release candidate
+name: Unsigned preview candidate
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to package, for example v0.1.0
+        description: Existing prerelease tag matching the crate version, for example v0.1.0-preview.1
         required: true
         type: string
   push:
@@ -35,6 +35,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tools/check-notices.test.mjs
       - uses: Swatinem/rust-cache@v2
       - name: Install native dependencies
         run: |
@@ -52,6 +56,17 @@ jobs:
         run: |
           crate_version="$(cargo metadata --locked --no-deps --format-version 1 | python3 -c 'import json, sys; data=json.load(sys.stdin); print(next(package["version"] for package in data["packages"] if package["name"] == "buffer-uppercut"))')"
           test "$RELEASE_TAG" = "v$crate_version"
+          case "$crate_version" in
+            *-preview.*) ;;
+            *) echo "Unsigned workflow accepts preview versions only"; exit 1 ;;
+          esac
+      - name: Require reviewed release inputs
+        run: |
+          test -s "docs/releases/${RELEASE_TAG#v}.md"
+          test -s docs/releases/THIRDPARTY.json
+          test -s docs/releases/APPROVED.txt
+          grep -Fx "$RELEASE_TAG" docs/releases/APPROVED.txt
+          node tools/check-notices.mjs docs/releases/THIRDPARTY.json
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --locked --workspace
@@ -65,8 +80,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            slug: linux-x64
           - os: windows-2022
             slug: windows-x64
           - os: macos-14
@@ -96,32 +109,64 @@ jobs:
         run: cargo install cargo-truce --version 6.3.0 --locked
       - name: Build CLAP and VST3
         run: cargo truce build --clap --vst3
+      - name: Install clap-validator
+        run: cargo install --git https://github.com/free-audio/clap-validator --locked
+      - name: Install pluginval 1.0.4
+        run: |
+          case "$RUNNER_OS" in
+            Linux) asset=pluginval_Linux.zip ;;
+            macOS) asset=pluginval_macOS.zip ;;
+            Windows) asset=pluginval_Windows.zip ;;
+          esac
+          mkdir -p target/tools/pluginval
+          curl --fail --location --retry 3 \
+            "https://github.com/Tracktion/pluginval/releases/download/v1.0.4/$asset" \
+            --output target/tools/pluginval.zip
+          unzip -q target/tools/pluginval.zip -d target/tools/pluginval
+          pluginval="$(find target/tools/pluginval -type f \( -name pluginval -o -name pluginval.exe \) -print -quit)"
+          test -n "$pluginval"
+          chmod +x "$pluginval"
+          dirname "$pluginval" >> "$GITHUB_PATH"
+      - name: Validate exact release bundles
+        run: |
+          cargo truce install --clap --vst3 --no-build
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cargo truce validate --pluginval --skip-gui-tests
+            clap-validator validate "target/bundles/Buffer Uppercut.clap"
+          else
+            cargo truce validate --clap --pluginval --skip-gui-tests
+          fi
+      - name: Check third-party notice baseline
+        run: |
+          cargo install cargo-bundle-licenses --version 4.2.0 --locked
+          cargo bundle-licenses --format json --output target/THIRDPARTY-discovered.json
+          node tools/check-notices.mjs \
+            docs/releases/THIRDPARTY.json target/THIRDPARTY-discovered.json
       - name: Stage plugin bundles
         run: |
           mkdir -p "dist/Buffer Uppercut"
           cp -R "target/bundles/Buffer Uppercut.clap" "dist/Buffer Uppercut/"
           cp -R "target/bundles/Buffer Uppercut.vst3" "dist/Buffer Uppercut/"
+          cp LICENSE "dist/Buffer Uppercut/"
+          cp docs/RELEASE-INSTALL.txt "dist/Buffer Uppercut/INSTALL.txt"
+          cp docs/releases/THIRDPARTY.json "dist/Buffer Uppercut/"
+          cp "docs/releases/${RELEASE_TAG#v}.md" "dist/Buffer Uppercut/RELEASE-NOTES.md"
       - name: Package macOS candidate
         if: runner.os == 'macOS'
         run: |
-          archive="Buffer-Uppercut-${RELEASE_TAG#v}-${{ matrix.slug }}-not-for-distribution.zip"
+          archive="Buffer-Uppercut-${RELEASE_TAG#v}-${{ matrix.slug }}-unsigned.zip"
           ditto -c -k --sequesterRsrc --keepParent "dist/Buffer Uppercut" "dist/$archive"
-      - name: Package Linux candidate
-        if: runner.os == 'Linux'
-        run: |
-          archive="Buffer-Uppercut-${RELEASE_TAG#v}-${{ matrix.slug }}-not-for-distribution.zip"
-          (cd dist && zip -qry "$archive" "Buffer Uppercut")
       - name: Package Windows candidate
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $version = $env:RELEASE_TAG.TrimStart('v')
-          $archive = "dist/Buffer-Uppercut-$version-${{ matrix.slug }}-not-for-distribution.zip"
+          $archive = "dist/Buffer-Uppercut-$version-${{ matrix.slug }}-unsigned.zip"
           Compress-Archive -Path "dist/Buffer Uppercut" -DestinationPath $archive
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.slug }}
-          path: dist/*-not-for-distribution.zip
+          path: dist/*-unsigned.zip
           if-no-files-found: error
 
   draft-release:
@@ -140,7 +185,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Generate checksums
-        run: (cd dist && sha256sum *-not-for-distribution.zip > SHA256SUMS)
+        run: (cd dist && sha256sum *-unsigned.zip > SHA256SUMS)
       - name: Create or update draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -151,7 +196,8 @@ jobs:
           else
             gh release create "$RELEASE_TAG" dist/* \
               --draft \
-              --generate-notes \
-              --title "Buffer Uppercut ${RELEASE_TAG#v} — NOT FOR DISTRIBUTION" \
+              --prerelease \
+              --notes-file "docs/releases/${RELEASE_TAG#v}.md" \
+              --title "Buffer Uppercut ${RELEASE_TAG#v} — Unsigned preview" \
               --verify-tag
           fi

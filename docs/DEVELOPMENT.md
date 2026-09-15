@@ -127,20 +127,20 @@ Actions page for controlled private testing. Standalone is not included. These
 artifacts are separate from public releases and are uploaded only after the
 Windows validators pass.
 
-`.github/workflows/release.yml` packages CLAP and VST3 from an existing `v*`
-tag on Linux, Windows, and macOS. It verifies that the tag matches the root
-crate version, runs the blocking automated checks, creates checksums, and
-creates or refreshes a draft GitHub release.
+`.github/workflows/release.yml` prepares unsigned CLAP/VST3 preview packages
+from existing `vVERSION` tags whose crate version contains `-preview.N`.
+It runs blocking automated checks and platform validators, checks reviewed
+third-party notices, includes installation instructions/license/release notes,
+creates checksums and prepares a draft prerelease. It never publishes itself.
+See [release inputs and approval](releases/README.md) before creating a tag.
 
-The current archives are explicitly named `not-for-distribution` and must remain
-drafts. Do not publish them. TRUCE gives locally built macOS bundles an ad-hoc
-signature, which is not a Developer ID distribution signature; Windows and Linux
-also lack their final release trust chain. Replace the candidate packaging stages
-with verified macOS Developer ID signing and notarization plus Windows
-Authenticode signing before the first public release. Signing credentials belong
-in the protected GitHub `release` environment, never in repository files or
-ordinary workflow output. Configure that environment in repository settings with
-required reviewers before using the workflow for release credentials.
+Unsigned previews are permitted by ADR 0012; they are not stable releases.
+TRUCE's macOS ad-hoc signatures are not Developer ID signing or notarization.
+Previously generated `not-for-distribution` candidates remain internal and must
+not be promoted. Trusted signing and macOS notarization can be added later.
+Signing credentials belong in the protected GitHub `release` environment,
+never in repository files or ordinary workflow output. Configure required
+reviewers before using that environment for release credentials.
 
 ### Shell reload
 

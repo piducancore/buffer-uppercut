@@ -1,5 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import slintBadge from '../assets/made-with-slint.png';
 import { loadReleases, packagesFor, platforms, releasesUrl } from '../lib/releases.mjs';
 const releases = await loadReleases();
 const latest = releases.find((release) => packagesFor(release).length > 0);
@@ -23,6 +24,7 @@ const date = (value) => new Date(value).toLocaleDateString('en', { year: 'numeri
       <div class="notice"><h3>About unsigned builds</h3><p>Preview packages do not carry a trusted publisher signature. macOS previews are not Developer ID signed or notarized. Your operating system or DAW may warn about or block them.</p><p>Use previews in test projects and keep monitoring levels low. Do not disable antivirus or system-wide security protections.</p><a href={`${base}/installation/`}>Read installation instructions ↗</a></div>
       <p>{checksums && <a href={checksums.browser_download_url}>Download SHA-256 checksums · </a>}<a href={latest?.html_url ?? releasesUrl}>View release assets on GitHub ↗</a></p>
       <p class="muted">Checksums detect changed files. They do not replace code signing. See each release’s notes for architecture, OS requirements and known limitations.</p>
+      <p style="margin-top: 2rem"><a href="https://slint.dev"><img src={slintBadge.src} width="160" height={Math.round(160 * slintBadge.height / slintBadge.width)} alt="Made with Slint" loading="lazy" /></a></p>
     </section>
     <aside class="release-sidebar" aria-labelledby="history-title"><p class="eyebrow">THE CHANGELOG</p><h2 id="history-title">Release history</h2>
       {releases.length === 0 ? <p class="muted">Published versions will appear here automatically, with dates and release notes.</p> : releases.map((release) => <article class="history-item"><a class="version" href={release.html_url}>{release.tag_name} ↗</a><time datetime={release.published_at}>{date(release.published_at)}</time><span class="badge">{release.prerelease ? 'Preview' : 'Release'}</span>{packagesFor(release).length > 0 && <span class="badge warning">Unsigned packages</span>}<details><summary>Release notes</summary><div class="release-notes">{release.body || 'See the release on GitHub for details.'}</div></details></article>)}

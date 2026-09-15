@@ -51,14 +51,18 @@ This file tracks current product status. Architectural rationale belongs in
 - Linux, Windows, and macOS CI cover formatting, Clippy, contract tests,
   `rt-paranoid`, CLAP/VST3 builds, the standalone development-host build, and
   headless validators.
-- A tag/manual workflow packages `not-for-distribution` CLAP/VST3 candidates
-  with checksums into a draft GitHub release; candidates cannot be refreshed
-  after a release is published.
+- Original project code is MIT licensed; dependencies retain upstream terms.
+- A tag/manual workflow prepares unsigned CLAP/VST3 draft prereleases after
+  automated checks, validators and reviewed release inputs. Publication is
+  deliberate; published assets cannot be overwritten by the workflow.
 - Archived C++/WRAC state, preset, ID, and source compatibility are explicitly
   out of scope.
 - The Astro product website in `site/` uses GitHub Actions-based Pages
   publishing at `https://piducan.dev/buffer-uppercut/`. The canonical repository
   is public; the download page excludes internal candidates and draft releases.
+- Weekend-long Ableton Live use on macOS and Windows completed without a
+  reported crash. Exact tagged package rechecks remain required before the first
+  unsigned preview; Linux is excluded from that preview pending real-host use.
 
 ## Next: serial release sign-off
 
@@ -98,8 +102,9 @@ This file tracks current product status. Architectural rationale belongs in
 
 ## Candidate product work
 
-- Add distributable unsigned preview packaging and release notes before the
-  website can offer public downloads; existing candidates remain internal.
+- Complete dependency/resource license notices,
+  release notes and host acceptance before approving the first unsigned preview;
+  see [release inputs](releases/README.md). Existing internal candidates stay internal.
 
 - Sample-accurate event segmentation.
 - User-remappable direct-key layouts after the physical default is validated.
@@ -109,8 +114,7 @@ This file tracks current product status. Architectural rationale belongs in
 - Expanded visualization or spectrum analysis.
 - Preset browser and tagging.
 - Add macOS and Windows signing and macOS notarization to the CLAP/VST3 release
-  workflow; replace its not-for-distribution archives after credentials are
-  available.
+  workflow after credentials are available; unsigned previews remain labeled.
 - Define standalone audio-input, monitoring, and no-input behavior before
   reconsidering it as a distributed product.
 - Additional plugin formats after CI and real-host validation.

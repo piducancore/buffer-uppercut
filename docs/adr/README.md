@@ -39,3 +39,5 @@ Current records:
   product format.
 - [0011 — Static product website alongside the plugin](0011-static-product-website.md)
   governs Astro, GitHub Pages and release-backed public downloads.
+- [0012 — MIT original code and unsigned preview distribution](0012-mit-and-unsigned-previews.md)
+  governs licensing, unsigned preview packages and publication gates.

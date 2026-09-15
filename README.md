@@ -112,3 +112,10 @@ GitHub Releases.
 - [Decision records](docs/adr/README.md): architectural rationale
 
 New agents must begin with [AGENTS.md](AGENTS.md).
+
+## License
+
+Buffer Uppercut's original code is [MIT licensed](LICENSE), copyright
+2026 piducancore. Vendored code and third-party dependencies retain their own
+licenses; the root MIT license does not relicense them. See
+[distribution licensing](docs/LICENSING.md) for dependency obligations.

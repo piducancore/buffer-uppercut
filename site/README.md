@@ -57,8 +57,8 @@ Only these explicitly unsigned archives create download buttons. Internal
 status are excluded. Architecture and runtime requirements must be documented
 in release notes. macOS ad-hoc signing is not Developer ID signing.
 
-The existing candidate workflow remains draft-only and cannot populate public
-downloads. Publishing an unsigned preview requires a separate deliberate
-release-packaging change; the website does not automatically publish binaries
-or mark them stable. When trusted signing is introduced, extend the package
+The unsigned-preview workflow remains draft-only and cannot populate public
+downloads until its draft is deliberately published after release review; see
+[release inputs](../docs/releases/README.md). The website does not automatically
+publish binaries or mark them stable. When trusted signing is introduced, extend the package
 metadata, filename recognition, notices and tests together.

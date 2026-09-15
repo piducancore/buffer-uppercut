@@ -221,6 +221,20 @@ Wet widget starts from each pad's current value and that editor type selection
 loads all seven defaults. Recorded compound automation and listening acceptance
 remain on the checklist.
 
+## Ableton Live endurance evidence
+
+User-reported acceptance (2026-09-14): Buffer Uppercut was used throughout a
+weekend in Ableton Live on both macOS and Windows without a crash. The plugin
+loaded and was actively played in real music-making sessions. This supports
+including macOS and Windows in the first unsigned preview.
+
+This evidence applies to the tested development builds, not yet to the final
+ZIPs produced from a preview tag. Before publishing, install each exact draft
+package in Ableton Live on its target OS and confirm discovery, audio pass-through,
+pad operation and clean unload. The report does not establish Linux host
+compatibility, exhaustive CLAP acceptance, every checklist item below, or a
+stable-release claim.
+
 ### Discovery and lifecycle
 
 - VST3 and CLAP appear as **Buffer Uppercut**.
