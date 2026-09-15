@@ -37,6 +37,8 @@ automatically and refuses to overwrite a published release. Review the actual
 draft artifacts before publishing; publication and a Website manual dispatch
 then make the downloads available. Signing and stable promotion are separate.
 
-The first preview targets macOS and Windows only, based on recorded Ableton Live
-use. Linux remains built and validated by ordinary CI but is not packaged or
-advertised until it passes a real-host smoke test.
+Preview 1 targeted macOS and Windows based on recorded Ableton Live use.
+Preview 2 adds an x86-64 Linux package built on Ubuntu 22.04. Linux currently
+has automated CLAP/pluginval coverage only and must be described as unverified
+in a real Linux DAW. Do not claim LMMS compatibility: current LMMS releases do
+not natively host CLAP or VST3.

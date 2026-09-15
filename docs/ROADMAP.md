@@ -61,8 +61,9 @@ This file tracks current product status. Architectural rationale belongs in
   publishing at `https://piducan.dev/buffer-uppercut/`. The canonical repository
   is public; the download page excludes internal candidates and draft releases.
 - Weekend-long Ableton Live use on macOS and Windows completed without a
-  reported crash. Exact tagged package rechecks remain required before the first
-  unsigned preview; Linux is excluded from that preview pending real-host use.
+  reported crash. Preview 1 shipped those two platforms. Preview 2 adds an
+  x86-64 Linux package with exact-bundle automated validation but no real Linux
+  DAW evidence; current LMMS versions do not natively host CLAP or VST3.
 
 ## Next: serial release sign-off
 
@@ -102,9 +103,9 @@ This file tracks current product status. Architectural rationale belongs in
 
 ## Candidate product work
 
-- Complete dependency/resource license notices,
-  release notes and host acceptance before approving the first unsigned preview;
-  see [release inputs](releases/README.md). Existing internal candidates stay internal.
+- Complete remaining real-host acceptance before stable promotion; see
+  [release inputs](releases/README.md). Linux needs a compatible CLAP/VST3 host
+  smoke test, because LMMS cannot directly exercise the shipped formats.
 
 - Sample-accurate event segmentation.
 - User-remappable direct-key layouts after the physical default is validated.

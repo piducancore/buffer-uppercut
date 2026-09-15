@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing prerelease tag matching the crate version, for example v0.1.0-preview.1
+        description: Existing prerelease tag matching the crate version, for example v0.1.0-preview.2
         required: true
         type: string
   push:
@@ -80,6 +80,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: ubuntu-22.04
+            slug: linux-x64
           - os: windows-2022
             slug: windows-x64
           - os: macos-14
@@ -156,6 +158,11 @@ jobs:
         run: |
           archive="Buffer-Uppercut-${RELEASE_TAG#v}-${{ matrix.slug }}-unsigned.zip"
           ditto -c -k --sequesterRsrc --keepParent "dist/Buffer Uppercut" "dist/$archive"
+      - name: Package Linux candidate
+        if: runner.os == 'Linux'
+        run: |
+          archive="Buffer-Uppercut-${RELEASE_TAG#v}-${{ matrix.slug }}-unsigned.zip"
+          (cd dist && zip -qry "$archive" "Buffer Uppercut")
       - name: Package Windows candidate
         if: runner.os == 'Windows'
         shell: pwsh

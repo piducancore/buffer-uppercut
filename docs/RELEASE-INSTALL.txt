@@ -24,6 +24,8 @@ Linux:
   Common scan directories: ~/.vst3/ and ~/.clap/
   Use your DAW's configured locations. Check distribution/runtime requirements
   and confirmed host compatibility in RELEASE-NOTES.md.
+  LMMS does not currently host CLAP or VST3 natively, so this package cannot be
+  loaded directly in LMMS. Use a compatible Linux host; do not rename formats.
 
 Reopen/rescan the DAW and insert the effect on a track with playing audio.
 With no pads held, audio passes through dry. Hold an editor pad, or route MIDI

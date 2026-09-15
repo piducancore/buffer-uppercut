@@ -6,10 +6,11 @@ test('only distributable unsigned plugin packages get download buttons', () => {
   const assets = [
     'Buffer-Uppercut-0.1.0-windows-x64-unsigned.zip',
     'Buffer-Uppercut-0.1.0-linux-x64-not-for-distribution.zip',
+    'Buffer-Uppercut-0.1.0-linux-x64-unsigned.zip',
     'Buffer-Uppercut-0.1.0-macos.zip',
     'standalone-windows-x64-unsigned.zip',
   ].map((name) => ({ name }));
-  assert.deepEqual(packagesFor({ assets }).map((item) => item.slug), ['windows-x64']);
+  assert.deepEqual(packagesFor({ assets }).map((item) => item.slug), ['windows-x64', 'linux-x64']);
 });
 
 test('drafts never leak into history and newest published date comes first', () => {

@@ -1,3 +1,4 @@
 # Exact preview tags reviewed for candidate creation. Publication still requires
 # inspection of the resulting GitHub draft and is never automatic.
 v0.1.0-preview.1
+v0.1.0-preview.2

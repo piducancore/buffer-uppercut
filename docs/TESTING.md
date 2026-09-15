@@ -235,6 +235,18 @@ pad operation and clean unload. The report does not establish Linux host
 compatibility, exhaustive CLAP acceptance, every checklist item below, or a
 stable-release claim.
 
+## Linux preview evidence
+
+Preview 2 adds an x86-64 Linux package built on Ubuntu 22.04. The exact tagged
+CLAP and VST3 bundles must pass CLAP Validator and pluginval on the Linux release
+runner before the draft is created. No real Linux DAW smoke test has been
+recorded, so the preview accepts and discloses that limitation.
+
+LMMS cannot serve as that smoke-test host because current LMMS releases do not
+natively host CLAP or VST3. Test discovery, audio pass-through, editor opening,
+MIDI/pointer triggering, project reload and clean unload in a compatible Linux
+host before making any Linux compatibility claim.
+
 ### Discovery and lifecycle
 
 - VST3 and CLAP appear as **Buffer Uppercut**.
