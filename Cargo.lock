@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "buffer-uppercut"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 dependencies = [
  "buffer-uppercut-dsp",
  "buffer-uppercut-kit",
@@ -568,11 +568,11 @@ dependencies = [
 
 [[package]]
 name = "buffer-uppercut-dsp"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 
 [[package]]
 name = "buffer-uppercut-kit"
-version = "0.1.0-preview.2"
+version = "0.1.0-preview.3"
 dependencies = [
  "buffer-uppercut-dsp",
 ]

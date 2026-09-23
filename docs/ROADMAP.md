@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-09-14.
+Last updated: 2026-09-23.
 
 This file tracks current product status. Architectural rationale belongs in
 `adr/`; durable behavior belongs in `CONTRACTS.md`.
@@ -15,7 +15,9 @@ This file tracks current product status. Architectural rationale belongs in
   The selector has nine choices; the 145 IDs and kit v1 layout remain unchanged.
 
 - TRUCE 6.3 is the sole canonical framework.
-- Slint 1.15.1 is the sole editor implementation.
+- Slint 1.15.1 is the sole editor implementation. The editor uses a cream and
+  charcoal chassis, light aligned keycaps, responsive dials, and acid-yellow
+  selection/performance accents; see [visual hierarchy](ARCHITECTURE.md#editor-visual-hierarchy).
 - Product identity is **Buffer Uppercut**, not a preview or comparison build.
 - CLAP and VST3 are the supported product formats. The standalone target builds
   as a development host and is excluded from distribution.
@@ -66,6 +68,10 @@ This file tracks current product status. Architectural rationale belongs in
   DAW evidence; current LMMS versions do not natively host CLAP or VST3.
 
 ## Next: serial release sign-off
+
+- Preview 3 prepares the redesigned native editor for the existing macOS,
+  Windows and Linux unsigned packages. Platform and exact-artifact acceptance
+  limitations are recorded in [its release notes](releases/0.1.0-preview.3.md).
 
 - Finish recorded type/macro automation and filter listening acceptance in
   `TESTING.md`. VST3 knob synchronization and type-default writes pass live host

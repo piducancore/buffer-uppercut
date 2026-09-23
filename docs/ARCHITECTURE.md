@@ -187,6 +187,19 @@ Complete plugin preset loading and saving belongs to the host-native preset UI
 supplied by the TRUCE wrappers. No platform file dialog is launched from the
 embedded editor.
 
+## Editor visual hierarchy
+
+The native editor uses a cream chassis, charcoal instrument panels, and acid
+yellow accents. Factory navigation and tempo sit above the stereo monitor;
+an aligned four-by-four bank of light keycaps sits beside the effect selector
+and all seven macros. A static signal-route strip describes audio flow.
+
+Yellow outlines and a left marker identify the selected pad; yellow fill and
+ACTIVE/HELD text identify performance holds, and warm orange identifies suspended
+pads. The effect selector carries a yellow TYPE RESETS label because changing
+it also loads macro defaults. Active Shift remains read-only. Host preset guidance
+is text, not an embedded menu. The editor has no extra modifier/spacebar triggers.
+
 ## Visualization flow
 
 `Engine::fill_visualization` reads preallocated `f32` history into 256 stereo

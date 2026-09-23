@@ -18,16 +18,17 @@ export struct MacroView {
     enabled: bool,
 }
 
-component BrutalSwitch inherits Rectangle {
+component InstrumentSwitch inherits Rectangle {
     in-out property <bool> checked: true;
     in property <string> label: "";
     callback toggled(bool);
 
     height: 28px;
-    width: 160px;
-    background: #0a0a0a;
+    width: 146px;
+    border-radius: 4px;
+    background: #232726;
     border-width: 1px;
-    border-color: root.checked ? #eaff00 : #676767;
+    border-color: root.checked ? #e5fa36 : #676767;
 
     HorizontalLayout {
         padding: 4px;
@@ -35,9 +36,9 @@ component BrutalSwitch inherits Rectangle {
 
         Rectangle {
             width: 32px;
-            background: root.checked ? #eaff00 : #202020;
+            background: root.checked ? #e5fa36 : #202020;
             border-width: 1px;
-            border-color: root.checked ? #eaff00 : #676767;
+            border-color: root.checked ? #e5fa36 : #676767;
 
             Text {
                 text: root.checked ? "ON" : "OFF";
@@ -51,7 +52,7 @@ component BrutalSwitch inherits Rectangle {
 
         Text {
             text: root.label;
-            color: root.checked ? #f2efe4 : #858278;
+            color: root.checked ? #f5f2e9 : #858278;
             font-size: 9px;
             font-weight: 700;
             vertical-alignment: center;
@@ -66,19 +67,20 @@ component BrutalSwitch inherits Rectangle {
     }
 }
 
-component BrutalButton inherits Rectangle {
+component InstrumentButton inherits Rectangle {
     in property <string> label: "";
     callback clicked();
 
     min-width: 0px;
-    height: 26px;
-    background: touch.pressed ? #eaff00 : #0a0a0a;
+    height: 34px;
+    border-radius: 4px;
+    background: touch.pressed ? #e5fa36 : #232726;
     border-width: 1px;
-    border-color: touch.has-hover ? #eaff00 : #676767;
+    border-color: touch.has-hover ? #e5fa36 : #676767;
 
     Text {
         text: root.label;
-        color: touch.pressed ? #080808 : touch.has-hover ? #eaff00 : #f2efe4;
+        color: touch.pressed ? #080808 : touch.has-hover ? #e5fa36 : #f5f2e9;
         font-size: 9px;
         font-weight: 900;
         horizontal-alignment: center;
@@ -91,7 +93,7 @@ component BrutalButton inherits Rectangle {
     }
 }
 
-component BrutalKnob inherits Rectangle {
+component InstrumentKnob inherits Rectangle {
     in property <float> value: 0.0;
     in property <string> value-text: "";
     in property <string> label: "";
@@ -106,23 +108,28 @@ component BrutalKnob inherits Rectangle {
     min-height: 0px;
     preferred-width: 82px;
     preferred-height: 82px;
-    background: root.type-selector ? #eaff00 : #0a0a0a;
-    border-width: root.type-selector ? 3px : 1px;
-    border-color: root.type-selector ? #f2efe4 : root.enabled ? #504f49 : #242424;
-    opacity: root.enabled ? 1.0 : 0.28;
+    background: transparent;
+    opacity: root.enabled ? 1.0 : 0.32;
+    property <length> dial-size: min(78px, min(root.width - 14px, root.height - 40px));
+    property <length> dial-top: max(4px, (root.height - root.dial-size - 40px) / 2);
 
+    Rectangle {
+        x: 6px; y: parent.height - 1px;
+        width: parent.width - 12px; height: 1px;
+        background: #454b47;
+    }
     property <float> angle: 135 + root.value * 270;
 
     Path {
-        x: (parent.width - 50px) / 2;
-        y: 2px;
-        width: 50px;
-        height: 50px;
+        x: (parent.width - root.dial-size) / 2;
+        y: root.dial-top;
+        width: root.dial-size;
+        height: root.dial-size;
         viewbox-x: 0;
         viewbox-y: 0;
         viewbox-width: 64;
         viewbox-height: 64;
-        stroke: root.type-selector ? #9aaa00 : #3e3e3a;
+        stroke: #4c524e;
         stroke-width: 5px;
 
         MoveTo { x: 32 + 27 * cos(135deg); y: 32 + 27 * sin(135deg); }
@@ -137,15 +144,15 @@ component BrutalKnob inherits Rectangle {
     }
 
     Path {
-        x: (parent.width - 50px) / 2;
-        y: 2px;
-        width: 50px;
-        height: 50px;
+        x: (parent.width - root.dial-size) / 2;
+        y: root.dial-top;
+        width: root.dial-size;
+        height: root.dial-size;
         viewbox-x: 0;
         viewbox-y: 0;
         viewbox-width: 64;
         viewbox-height: 64;
-        stroke: root.type-selector ? #080808 : root.enabled ? #eaff00 : #3e3e3a;
+        stroke: root.enabled ? #e5fa36 : #4c524e;
         stroke-width: 5px;
 
         MoveTo { x: 32 + 27 * cos(135deg); y: 32 + 27 * sin(135deg); }
@@ -160,15 +167,15 @@ component BrutalKnob inherits Rectangle {
     }
 
     Path {
-        x: (parent.width - 50px) / 2;
-        y: 2px;
-        width: 50px;
-        height: 50px;
+        x: (parent.width - root.dial-size) / 2;
+        y: root.dial-top;
+        width: root.dial-size;
+        height: root.dial-size;
         viewbox-x: 0;
         viewbox-y: 0;
         viewbox-width: 64;
         viewbox-height: 64;
-        stroke: root.type-selector ? #080808 : #f2efe4;
+        stroke: #f5f2e9;
         stroke-width: 2px;
 
         MoveTo { x: 32; y: 32; }
@@ -180,24 +187,32 @@ component BrutalKnob inherits Rectangle {
 
     Text {
         x: 3px;
-        y: 52px;
+        y: root.dial-top + root.dial-size + 2px;
         width: parent.width - 6px;
         height: 15px;
         text: root.enabled ? root.value-text : "—";
-        color: root.type-selector ? #080808 : root.enabled ? #f2efe4 : #6b6962;
+        color: root.enabled ? #f5f2e9 : #6b6962;
         font-size: 10px;
         font-weight: 700;
         horizontal-alignment: center;
         overflow: elide;
     }
 
+    Rectangle {
+        x: 2px;
+        y: root.dial-top + root.dial-size + 19px;
+        width: parent.width - 4px; height: 16px;
+        border-radius: 3px;
+        background: root.type-selector ? #e5fa36 : transparent;
+    }
+
     Text {
         x: 3px;
-        y: 66px;
+        y: root.dial-top + root.dial-size + 20px;
         width: parent.width - 6px;
         height: 14px;
         text: root.enabled ? root.label : "INACTIVE";
-        color: root.type-selector ? #080808 : root.enabled ? #eaff00 : #5a5852;
+        color: root.type-selector ? #202523 : root.enabled ? #e5fa36 : #5a5852;
         font-size: 9px;
         font-weight: 800;
         horizontal-alignment: center;
@@ -243,50 +258,47 @@ component PerformancePad inherits Rectangle {
     min-height: 0px;
     preferred-width: 112px;
     preferred-height: 58px;
-    background: root.data.suspended
-        ? #21100a
-        : touch.pressed || root.data.held ? #eaff00
-        : root.data.selected ? #f2efe4 : #111111;
-    border-width: root.data.selected || root.data.held || root.data.active || root.data.suspended ? 3px : 1px;
-    border-color: root.data.suspended ? #ff5b35
-        : root.data.active || root.data.held ? #eaff00
-        : root.data.selected ? #f2efe4 : #5a5953;
+    background: root.data.suspended ? #482d23
+        : touch.pressed || root.data.held ? #e5fa36
+        : touch.has-hover ? #ffffff : #f5f2e9;
+    border-radius: 5px;
+    border-width: root.data.selected ? 3px : 1px;
+    border-color: root.data.suspended ? #ff936e
+        : root.data.selected ? #e5fa36 : #d3d1c7;
 
+    Rectangle {
+        x: 7px; y: 9px; width: 3px; height: parent.height - 18px;
+        background: root.data.selected ? #67731c : transparent;
+    }
     HorizontalLayout {
-        padding: 8px;
-        spacing: 8px;
-
+        padding: 10px;
+        spacing: 4px;
         Text {
-            width: 38px;
+            width: 24px;
             text: root.data.key;
-            color: root.data.suspended ? #ff805f
-                : touch.pressed || root.data.held || root.data.selected ? #080808 : #f2efe4;
-            font-size: 24px;
-            font-weight: 900;
+            color: root.data.suspended ? #ffb494 : #202523;
+            font-size: 28px;
+            font-weight: 800;
             vertical-alignment: center;
         }
-
         VerticalLayout {
             alignment: center;
-            spacing: 0px;
-
+            spacing: 3px;
             Text {
                 text: root.data.effect;
-                color: root.data.suspended ? #ff805f
-                    : touch.pressed || root.data.held || root.data.selected ? #080808 : #eaff00;
-                font-size: 11px;
+                color: root.data.suspended ? #ffb494 : #202523;
+                font-size: 12px;
                 font-weight: 800;
                 overflow: elide;
             }
             Text {
-                text: root.data.suspended ? "SUSPENDED / " + root.data.number
+                text: root.data.suspended ? "WAIT / " + root.data.number
                     : root.data.active ? "ACTIVE / " + root.data.number
                     : root.data.held ? "HELD / " + root.data.number
                     : "MIDI " + root.data.note + " / " + root.data.number;
-                color: root.data.suspended ? #ff805f
-                    : touch.pressed || root.data.held || root.data.selected ? #292929 : #96938a;
+                color: root.data.suspended ? #ffb494 : #64675e;
                 font-size: 9px;
-                font-weight: 700;
+                overflow: elide;
             }
         }
     }
@@ -311,35 +323,36 @@ component WaveformPanel inherits Rectangle {
     in property <string> mode;
     in property <string> status;
 
-    background: root.captured ? #101307 : #0a0a0a;
-    border-width: root.captured ? 3px : 2px;
-    border-color: root.captured ? #eaff00 : #f2efe4;
+    background: root.captured ? #262d21 : #232726;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.captured ? #e5fa36 : #232726;
 
     VerticalLayout {
-        padding: root.captured ? 11px : 12px;
-        spacing: root.captured ? 7px : 5px;
+        padding: 12px;
+        spacing: 5px;
 
         HorizontalLayout {
-            height: root.captured ? 27px : 20px;
+            height: 22px;
             spacing: 8px;
 
             Text {
                 text: root.captured ? "CAPTURED PERFORMANCE CELL" : "STEREO BUFFER MONITOR";
-                color: root.captured ? #eaff00 : #f2efe4;
-                font-size: root.captured ? 13px : 11px;
+                color: root.captured ? #e5fa36 : #f5f2e9;
+                font-size: 12px;
                 font-weight: 900;
                 vertical-alignment: center;
             }
 
             Rectangle {
                 width: root.captured ? 138px : 160px;
-                background: root.captured ? #eaff00 : transparent;
+                background: root.captured ? #e5fa36 : transparent;
                 border-width: root.captured ? 0px : 1px;
                 border-color: #353531;
 
                 Text {
                     text: root.mode;
-                    color: root.captured ? #080808 : #eaff00;
+                    color: root.captured ? #080808 : #e5fa36;
                     font-size: 10px;
                     font-weight: 900;
                     horizontal-alignment: center;
@@ -349,11 +362,16 @@ component WaveformPanel inherits Rectangle {
         }
 
         Rectangle {
-            background: #050505;
+            background: #202423;
             border-width: 1px;
             border-color: root.captured ? #687300 : #353531;
             vertical-stretch: 1;
 
+            for beat in 17: Rectangle {
+                x: beat * (parent.width - 1px) / 16;
+                width: 1px; height: parent.height;
+                background: Math.mod(beat, 4) == 0 ? #646961 : #373e38;
+            }
             for line in 4: Rectangle {
                 x: 0px;
                 y: (line + 1) * parent.height / 5;
@@ -373,7 +391,7 @@ component WaveformPanel inherits Rectangle {
                 x: clamp(root.playhead * parent.width - 6px, 0px, parent.width - self.width);
                 width: 12px;
                 height: parent.height;
-                background: #eaff00;
+                background: #e5fa36;
                 opacity: 0.13;
             }
 
@@ -381,7 +399,7 @@ component WaveformPanel inherits Rectangle {
                 x: root.playhead * (parent.width - 2px);
                 width: root.captured ? 4px : 2px;
                 height: parent.height;
-                background: #eaff00;
+                background: #e5fa36;
             }
 
             Path {
@@ -394,10 +412,10 @@ component WaveformPanel inherits Rectangle {
                 viewbox-width: 1000;
                 viewbox-height: 32;
                 commands: root.left-path;
-                fill: #eaff00;
-                stroke: #eaff00;
+                fill: #e5fa36;
+                stroke: #e5fa36;
                 stroke-width: 0.8px;
-                opacity: root.captured ? 0.94 : 0.72;
+                opacity: 0.95;
             }
 
             Path {
@@ -410,17 +428,17 @@ component WaveformPanel inherits Rectangle {
                 viewbox-width: 1000;
                 viewbox-height: 32;
                 commands: root.right-path;
-                fill: #f2efe4;
-                stroke: #f2efe4;
+                fill: #e5fa36;
+                stroke: #e5fa36;
                 stroke-width: 0.8px;
-                opacity: root.captured ? 0.84 : 0.62;
+                opacity: 0.85;
             }
 
             Text {
                 x: 8px;
                 y: 6px;
                 text: "L";
-                color: #eaff00;
+                color: #e5fa36;
                 font-size: 9px;
                 font-weight: 900;
             }
@@ -428,7 +446,7 @@ component WaveformPanel inherits Rectangle {
                 x: 8px;
                 y: parent.height / 2 + 6px;
                 text: "R";
-                color: #f2efe4;
+                color: #f5f2e9;
                 font-size: 9px;
                 font-weight: 900;
             }
@@ -437,7 +455,7 @@ component WaveformPanel inherits Rectangle {
         Text {
             height: root.captured ? 18px : 16px;
             text: root.status;
-            color: root.captured ? #f2efe4 : #858278;
+            color: #b4b8ac;
             font-size: root.captured ? 10px : 9px;
             font-weight: root.captured ? 900 : 700;
             overflow: elide;
@@ -450,7 +468,7 @@ export component BufferUppercutUi inherits Window {
     min-height: 620px;
     preferred-width: 1120px;
     preferred-height: 700px;
-    background: #080808;
+    background: #f5f2e9;
     default-font-family: "JetBrains Mono";
 
     in property <[PadView]> pads;
@@ -489,129 +507,96 @@ export component BufferUppercutUi inherits Window {
     callback macro-value-changed(int, float);
     callback macro-edit-ended(int);
 
+    Rectangle {
+        x: 8px; y: 8px;
+        width: parent.width - 16px; height: parent.height - 16px;
+        background: transparent;
+        border-width: 2px; border-color: #232726; border-radius: 9px;
+    }
+
     VerticalLayout {
-        padding: 12px;
-        spacing: 7px;
+        padding: 18px;
+        spacing: 8px;
 
-        Rectangle {
-            height: 96px;
-            background: #0a0a0a;
-            border-width: 2px;
-            border-color: #f2efe4;
-
-            HorizontalLayout {
-                padding: 7px;
-                spacing: 12px;
-
+        HorizontalLayout {
+            height: 72px;
+            spacing: 14px;
+            VerticalLayout {
+                min-width: 300px;
+                preferred-width: 300px;
+                horizontal-stretch: 3;
+                alignment: center;
+                spacing: 6px;
+                Text {
+                    text: "BUFFER UPPERCUT";
+                    color: #202523;
+                    font-size: 30px;
+                    font-weight: 900;
+                }
+                Text {
+                    text: "REAL-TIME AUDIO MANIPULATION";
+                    color: #64675e;
+                    font-size: 10px;
+                }
+            }
+            Rectangle { width: 1px; background: #b6b8ac; }
+            VerticalLayout {
+                min-width: 170px;
+                preferred-width: 200px;
+                horizontal-stretch: 2;
+                alignment: center;
+                spacing: 7px;
+                Text { text: "FACTORY KIT"; color: #64675e; font-size: 9px; }
+                HorizontalLayout {
+                    height: 34px;
+                    spacing: 5px;
+                    InstrumentButton { width: 28px; label: "‹"; clicked => { root.previous-kit(); } }
+                    Rectangle {
+                        background: #232726; border-radius: 4px;
+                        Text {
+                            x: 8px; width: parent.width - 16px;
+                            text: root.kit-display; color: #e5fa36;
+                            font-size: 11px; vertical-alignment: center; overflow: elide;
+                        }
+                    }
+                    InstrumentButton { width: 28px; label: "›"; clicked => { root.next-kit(); } }
+                }
+            }
+            Rectangle {
+                min-width: 110px;
+                preferred-width: 140px;
+                horizontal-stretch: 1;
+                background: #e5fa36; border-radius: 5px;
                 VerticalLayout {
-                    width: 365px;
-                    spacing: 3px;
-
+                    padding: 8px; spacing: 1px; alignment: center;
                     Text {
-                        text: "BUFFER UPPERCUT";
-                        color: #f2efe4;
-                        font-size: 28px;
-                        font-weight: 900;
+                        text: root.tempo-text; color: #202523;
+                        font-size: 30px; font-weight: 900; horizontal-alignment: center;
                     }
-                    HorizontalLayout {
-                        height: 27px;
-                        spacing: 4px;
-
-                        BrutalButton {
-                            width: 28px;
-                            label: "<";
-                            clicked => { root.previous-kit(); }
-                        }
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            background: #111111;
-                            border-width: 1px;
-                            border-color: #676767;
-
-                            Text {
-                                x: 7px;
-                                width: parent.width - 14px;
-                                text: root.kit-display;
-                                color: #eaff00;
-                                font-size: 9px;
-                                font-weight: 900;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                        }
-                        BrutalButton {
-                            width: 28px;
-                            label: ">";
-                            clicked => { root.next-kit(); }
-                        }
-                    }
+                    Text { text: "HOST BPM"; color: #202523; font-size: 10px; horizontal-alignment: center; }
                 }
-
-                Rectangle {
-                    width: 150px;
-                    background: #eaff00;
-
-                    VerticalLayout {
-                        padding: 7px;
-                        spacing: 0px;
-
-                        Text {
-                            text: root.tempo-text;
-                            color: #080808;
-                            font-size: 25px;
-                            font-weight: 900;
-                            horizontal-alignment: center;
-                        }
-                        Text {
-                            text: "HOST BPM";
-                            color: #080808;
-                            font-size: 9px;
-                            font-weight: 900;
-                            horizontal-alignment: center;
-                        }
-                    }
-                }
-
-                Rectangle {
-                    width: 170px;
-                    background: #111111;
-                    border-width: 1px;
-                    border-color: #353531;
-
-                    VerticalLayout {
-                        padding: 8px;
-                        spacing: 2px;
-
-                        Text {
-                            text: "PRESETS";
-                            color: #858278;
-                            font-size: 9px;
-                            font-weight: 800;
-                        }
-                        Text {
-                            text: "HOST MENU";
-                            color: #eaff00;
-                            font-size: 14px;
-                            font-weight: 900;
-                        }
-                    }
-                }
-
-                Rectangle { horizontal-stretch: 1; background: transparent; }
-
-                BrutalKnob {
-                    width: 86px;
-                    height: 82px;
-                    value: root.pitch-value;
-                    value-text: root.pitch-text;
-                    label: "ACTIVE SHIFT";
-                    interactive: false;
+            }
+            VerticalLayout {
+                width: 116px;
+                alignment: center; spacing: 7px;
+                Text { text: "PRESETS"; color: #64675e; font-size: 9px; }
+                Text { text: "USE HOST MENU"; color: #202523; font-size: 11px; }
+            }
+            Rectangle {
+                width: 86px;
+                background: #232726; border-radius: 5px;
+                InstrumentKnob {
+                    width: parent.width; height: parent.height;
+                    value: root.pitch-value; value-text: root.pitch-text;
+                    label: "ACTIVE SHIFT"; interactive: false;
                 }
             }
         }
 
+        Rectangle { height: 1px; background: #232726; }
+
         WaveformPanel {
-            min-height: 128px;
+            min-height: 120px;
             vertical-stretch: 2;
             left-path: root.waveform-left;
             right-path: root.waveform-right;
@@ -622,128 +607,93 @@ export component BufferUppercutUi inherits Window {
         }
 
         HorizontalLayout {
-            min-height: 314px;
-            vertical-stretch: 3;
-            spacing: 11px;
+            height: 24px; spacing: 12px;
+            Text { text: "AUDIO IN"; color: #4b514b; font-size: 10px; vertical-alignment: center; }
+            Rectangle { background: transparent; Rectangle { y: 12px; height: 1px; width: parent.width; background: #777d71; } }
+            Text { text: "BUFFER ENGINE"; color: #202523; font-size: 10px; vertical-alignment: center; }
+            Rectangle { background: transparent; Rectangle { y: 12px; height: 1px; width: parent.width; background: #777d71; } }
+            Text { text: "SERIAL EFFECTS  →"; color: #202523; font-size: 10px; vertical-alignment: center; }
+            Rectangle { background: transparent; Rectangle { y: 12px; height: 1px; width: parent.width; background: #777d71; } }
+            Text { text: "AUDIO OUT"; color: #4b514b; font-size: 10px; vertical-alignment: center; }
+        }
 
+        workbench := Rectangle {
+            min-width: 0px;
+            min-height: 270px;
+            vertical-stretch: 4;
+            background: transparent;
             Rectangle {
-                horizontal-stretch: 5;
-                background: #0a0a0a;
-                border-width: 2px;
-                border-color: #f2efe4;
-
+                x: 0px; y: 0px;
+                width: (workbench.width - 10px) * 0.60;
+                height: workbench.height;
+                background: #232726; border-radius: 6px;
                 VerticalLayout {
-                    padding: 12px;
-                    spacing: 8px;
-
+                    padding: 12px; spacing: 10px;
                     HorizontalLayout {
-                        height: 28px;
-                        spacing: 8px;
-
+                        height: 28px; spacing: 8px;
                         Text {
                             text: "PERFORMANCE KEYS";
-                            color: #f2efe4;
-                            font-size: 11px;
-                            font-weight: 900;
-                            vertical-alignment: center;
+                            min-width: 0px; overflow: elide;
+                            color: #f5f2e9; font-size: 12px; font-weight: 800; vertical-alignment: center;
                         }
-
-                        BrutalSwitch {
-                            checked: root.auto-select;
-                            label: "AUTO-SELECT MIDI";
-                            toggled(value) => {
-                                root.auto-select = value;
-                                root.auto-select-toggled(value);
-                            }
+                        InstrumentSwitch {
+                            checked: root.auto-select; label: "AUTO-SELECT MIDI";
+                            toggled(value) => { root.auto-select = value; root.auto-select-toggled(value); }
                         }
-
-                        BrutalSwitch {
-                            checked: root.direct-keys;
-                            label: "DIRECT KEYS";
-                            toggled(value) => {
-                                root.direct-keys = value;
-                                root.direct-keys-toggled(value);
-                            }
+                        InstrumentSwitch {
+                            checked: root.direct-keys; label: "DIRECT KEYS";
+                            toggled(value) => { root.direct-keys = value; root.direct-keys-toggled(value); }
                         }
                     }
-
                     Rectangle {
-                        background: transparent;
-                        min-height: 0px;
-                        vertical-stretch: 1;
-
+                        background: transparent; min-height: 0px; vertical-stretch: 1;
                         for pad[index] in root.pads: PerformancePad {
-                            x: Math.mod(index, 4) * ((parent.width - 42px) / 4 + 7px)
-                                + Math.floor(index / 4) * 7px;
+                            x: Math.mod(index, 4) * (parent.width + 7px) / 4;
                             y: Math.floor(index / 4) * (parent.height + 7px) / 4;
-                            width: (parent.width - 42px) / 4;
+                            width: (parent.width - 21px) / 4;
                             height: (parent.height - 21px) / 4;
-                            data: pad;
-                            index: index;
+                            data: pad; index: index;
                             pressed(index) => { root.pad-pressed(index); }
                             released(index) => { root.pad-released(index); }
                         }
                     }
+                    HorizontalLayout {
+                        height: 17px;
+                        Text { text: "HOLD TO PLAY · RELEASE TO END"; color: #b4b8ac; font-size: 9px; vertical-alignment: center; }
+                        Text { text: "16 PADS / 6 ACTIVE MAX"; color: #b4b8ac; font-size: 9px; horizontal-alignment: right; vertical-alignment: center; }
+                    }
                 }
             }
-
             Rectangle {
-                horizontal-stretch: 4;
-                background: #0a0a0a;
-                border-width: 2px;
-                border-color: #f2efe4;
-
+                x: (workbench.width - 10px) * 0.60 + 10px;
+                y: 0px;
+                width: (workbench.width - 10px) * 0.40;
+                height: workbench.height;
+                background: #232726; border-radius: 6px;
                 VerticalLayout {
-                    padding: 12px;
-                    spacing: 8px;
-
+                    padding: 12px; spacing: 8px;
                     HorizontalLayout {
                         height: 28px;
-
-                        Text {
-                            text: "PAD " + (root.selected-pad + 1);
-                            color: #f2efe4;
-                            font-size: 18px;
-                            font-weight: 900;
-                        }
-                        Text {
-                            text: root.selected-pad-note;
-                            color: #eaff00;
-                            font-size: 10px;
-                            font-weight: 800;
-                            horizontal-alignment: right;
-                            vertical-alignment: center;
-                        }
+                        Text { text: "PAD " + (root.selected-pad + 1); color: #f5f2e9; font-size: 18px; font-weight: 800; vertical-alignment: center; }
+                        Text { text: root.selected-pad-note; color: #e5fa36; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
                     }
-
                     Rectangle {
-                        background: transparent;
-                        min-height: 0px;
-                        vertical-stretch: 1;
-
-                        BrutalKnob {
-                            x: 0px;
-                            y: 0px;
-                            width: (parent.width - 21px) / 4;
-                            height: (parent.height - 7px) / 2;
-                            value: root.effect-value;
-                            value-text: root.effect-name;
-                            label: "TYPE RESETS";
-                            type-selector: true;
+                        background: transparent; min-height: 0px; vertical-stretch: 1;
+                        InstrumentKnob {
+                            x: 0px; y: 0px;
+                            width: (parent.width - 21px) / 4; height: (parent.height - 7px) / 2;
+                            value: root.effect-value; value-text: root.effect-name;
+                            label: "TYPE RESETS"; type-selector: true;
                             edit-began => { root.effect-edit-began(); }
                             value-changed(value) => { root.effect-value-changed(value); }
                             edit-ended => { root.effect-edit-ended(); }
                         }
-
-                        for macro[index] in root.macros: BrutalKnob {
+                        for macro[index] in root.macros: InstrumentKnob {
                             x: Math.mod(index + 1, 4) * (parent.width + 7px) / 4;
                             y: Math.floor((index + 1) / 4) * (parent.height + 7px) / 2;
-                            width: (parent.width - 21px) / 4;
-                            height: (parent.height - 7px) / 2;
-                            value: macro.value;
-                            value-text: macro.value-text;
-                            label: macro.label;
-                            enabled: macro.enabled;
+                            width: (parent.width - 21px) / 4; height: (parent.height - 7px) / 2;
+                            value: macro.value; value-text: macro.value-text;
+                            label: macro.label; enabled: macro.enabled;
                             edit-began => { root.macro-edit-began(index); }
                             value-changed(value) => { root.macro-value-changed(index, value); }
                             edit-ended => { root.macro-edit-ended(index); }
@@ -752,23 +702,11 @@ export component BufferUppercutUi inherits Window {
                 }
             }
         }
-
+        Rectangle { height: 1px; background: #93978b; }
         HorizontalLayout {
-            height: 18px;
-
-            Text {
-                text: "DSP F64 / PARAMS 145 / 6 ACTIVE MAX / PHYSICAL KEYS";
-                color: #6c6962;
-                font-size: 9px;
-                font-weight: 700;
-            }
-            Text {
-                text: "BUFFER UPPERCUT // LIVE";
-                color: #eaff00;
-                font-size: 9px;
-                font-weight: 900;
-                horizontal-alignment: right;
-            }
+            height: 14px;
+            Text { text: "STEREO / MOMENTARY PERFORMANCE"; color: #64675e; font-size: 9px; }
+            Text { text: "BUFFER UPPERCUT  //  LIVE"; color: #202523; font-size: 9px; horizontal-alignment: right; }
         }
     }
 }

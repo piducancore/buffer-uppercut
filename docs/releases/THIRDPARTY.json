@@ -731,7 +731,7 @@
     },
     {
       "package_name": "buffer-uppercut-dsp",
-      "package_version": "0.1.0-preview.2",
+      "package_version": "0.1.0-preview.3",
       "repository": "",
       "license": "MIT",
       "licenses": [
@@ -743,7 +743,7 @@
     },
     {
       "package_name": "buffer-uppercut-kit",
-      "package_version": "0.1.0-preview.2",
+      "package_version": "0.1.0-preview.3",
       "repository": "",
       "license": "MIT",
       "licenses": [

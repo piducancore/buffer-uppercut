@@ -126,6 +126,21 @@ A Vinyl preview exercises all seven macro labels and the final selector choice:
 BUFFER_UPPERCUT_EDITOR_PREVIEW=vinyl cargo truce screenshot --out screenshots/slint-vinyl.png --check --debug --scale 1
 ```
 
+## Editor redesign verification (2026-09-23)
+
+The preview 3 editor has passing default, minimum, wide, captured-cell and Vinyl
+screenshot baselines. The redesign passed local formatting, all-feature Clippy,
+workspace tests, `rt-paranoid`, CLAP/VST3 builds, and CLAP Validator (42 passed,
+zero failures or warnings, two skipped).
+
+Both formats opened the redesigned native editor in macOS REAPER 7.78.
+Pointer selection and macro dragging passed in both. VST3 additionally verified
+that a Wet drag starts from the newly selected pad's current value and that
+changing Filter to Vinyl loads all seven defaults. CLAP factory navigation and
+the direct-key toggle updated correctly. These local checks do not establish
+exact release-ZIP acceptance on every platform or complete the broader release
+checklists below.
+
 ## Focused Vinyl acceptance
 
 Automated DSP tests cover audible pitch movement, stereo timing, wear response,
