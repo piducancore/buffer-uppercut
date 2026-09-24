@@ -271,13 +271,16 @@ component PerformancePad inherits Rectangle {
         background: root.data.selected ? #67731c : transparent;
     }
     HorizontalLayout {
-        padding: 10px;
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: root.height < 46px ? 3px : 10px;
+        padding-bottom: root.height < 46px ? 3px : 10px;
         spacing: 4px;
         Text {
             width: 24px;
             text: root.data.key;
             color: root.data.suspended ? #ffb494 : #202523;
-            font-size: 28px;
+            font-size: root.height < 46px ? 24px : 28px;
             font-weight: 800;
             vertical-alignment: center;
         }
@@ -480,6 +483,9 @@ export component BufferUppercutUi inherits Window {
     in property <string> tempo-text: "--.-";
     in-out property <bool> auto-select: true;
     in-out property <bool> direct-keys: false;
+    in property <bool> key-learning: false;
+    in property <bool> key-conflict: false;
+    in property <string> key-status: "PHYSICAL KEYS · SELECT A PAD TO MAP";
     in property <float> pitch-value: 0.5;
     in property <string> pitch-text: "0 st";
     in property <string> waveform-left: "";
@@ -493,11 +499,13 @@ export component BufferUppercutUi inherits Window {
 
     callback previous-kit();
     callback next-kit();
-    callback pitch-edit-began();
-    callback pitch-value-changed(float);
-    callback pitch-edit-ended();
     callback auto-select-toggled(bool);
     callback direct-keys-toggled(bool);
+    callback learn-key();
+    callback cancel-learn();
+    callback clear-key();
+    callback reset-keys();
+    callback swap-keys();
     callback pad-pressed(int);
     callback pad-released(int);
     callback effect-edit-began();
@@ -658,9 +666,22 @@ export component BufferUppercutUi inherits Window {
                         }
                     }
                     HorizontalLayout {
-                        height: 17px;
-                        Text { text: "HOLD TO PLAY · RELEASE TO END"; color: #b4b8ac; font-size: 9px; vertical-alignment: center; }
-                        Text { text: "16 PADS / 6 ACTIVE MAX"; color: #b4b8ac; font-size: 9px; horizontal-alignment: right; vertical-alignment: center; }
+                        height: 25px; spacing: 6px;
+                        InstrumentButton {
+                            label: root.key-learning ? "CANCEL" : "LEARN PAD " + (root.selected-pad + 1);
+                            clicked => { if root.key-learning { root.cancel-learn(); } else { root.learn-key(); } }
+                        }
+                        if root.key-conflict: InstrumentButton {
+                            label: "SWAP";
+                            clicked => { root.swap-keys(); }
+                        }
+                        InstrumentButton { label: "CLEAR KEY"; clicked => { root.clear-key(); } }
+                        InstrumentButton { label: "RESET LAYOUT"; clicked => { root.reset-keys(); } }
+                    }
+                    Text {
+                        height: 14px; min-width: 0px; overflow: elide;
+                        text: root.key-status; color: root.key-learning ? #e5fa36 : #b4b8ac; font-size: 9px;
+                        vertical-alignment: center;
                     }
                 }
             }

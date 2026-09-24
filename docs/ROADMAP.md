@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-09-23.
+Last updated: 2026-09-24.
 
 This file tracks current product status. Architectural rationale belongs in
 `adr/`; durable behavior belongs in `CONTRACTS.md`.
@@ -9,10 +9,12 @@ This file tracks current product status. Architectural rationale belongs in
 
 - Pitch is one effect with Down, Trigger, and Up roles. A held Trigger runs a
   tempo-preserving grain shifter; action taps accumulate their configured Step
-  until the final Trigger releases. Beat Repeat keeps independent Slice Pitch.
+  until the final Trigger releases. Active Shift is transient, read-only UI
+  state rather than a host parameter or preset field. Beat Repeat keeps
+  independent Slice Pitch.
 - Vinyl is effect type 8 with independent wow/flutter delay, wear, drive, dust,
   noise, and wet mix. The fifth factory kit, Vinyl Cuts, provides four textures.
-  The selector has nine choices; the 145 IDs and kit v1 layout remain unchanged.
+  The selector has nine choices.
 
 - TRUCE 6.3 is the sole canonical framework.
 - Slint 1.15.1 is the sole editor implementation. The editor uses a cream and
@@ -32,10 +34,16 @@ This file tracks current product status. Architectural rationale belongs in
 - Sixteen independent stereo `f32` slot histories cover at least eight seconds
   per channel. Configured buffer history records exact chain-position input even
   while its processor is released or suspended.
-- The 16-slot, 145-parameter host schema and `.bupreset` kit version 1 remain
-  unchanged.
-- MIDI, automation, pointer input, and the physical `1234/QWER/ASDF/ZXCV`
-  performance layout aggregate without one source releasing another.
+- The 16-slot host schema has 144 automatable parameters at stable IDs `1..144`.
+  Native `.bupreset` version 3 stores durable slot configuration and a validated
+  physical-key map without the transient Active Shift value.
+- Pointer and configurable physical-key input send combined pad Trigger host
+  gestures. MIDI remains independently held. The default layout is
+  `1234/QWER/ASDF/ZXCV`; Learn, Clear, Reset Layout, and explicit swaps are
+  implemented. Host recording acceptance remains pending.
+- Host/native persistence restores the same durable sounds, name, and key map.
+  Recall and activation release momentary Triggers. Native-file import/export
+  still has no embedded editor UI.
 - Direct keys are opt-in for CLAP/VST3 and enabled by default in the standalone
   development host.
 - Host tempo, automation, host-native preset recall, semantic macro values,
@@ -48,8 +56,8 @@ This file tracks current product status. Architectural rationale belongs in
 - Processing is allocation-free after activation according to `rt-paranoid`.
 - Three deterministic size baselines plus captured-state and Vinyl baselines
   exist for the Slint editor.
-- The current serial build loads in macOS REAPER; MIDI and focused direct-key
-  performance have been confirmed in the installed plugin.
+- Earlier serial builds loaded in macOS REAPER with MIDI and focused direct-key
+  performance. This evidence does not accept the current mapping/gesture changes.
 - Linux, Windows, and macOS CI cover formatting, Clippy, contract tests,
   `rt-paranoid`, CLAP/VST3 builds, the standalone development-host build, and
   headless validators.
@@ -67,11 +75,24 @@ This file tracks current product status. Architectural rationale belongs in
   x86-64 Linux package with exact-bundle automated validation but no real Linux
   DAW evidence; current LMMS versions do not natively host CLAP or VST3.
 
-## Next: serial release sign-off
+## Next: stable release sign-off
 
-- Preview 3 prepares the redesigned native editor for the existing macOS,
-  Windows and Linux unsigned packages. Platform and exact-artifact acceptance
-  limitations are recorded in [its release notes](releases/0.1.0-preview.3.md).
+- Preview 4 introduces configurable direct-key layouts and host-recordable
+  pointer/direct-key pad gestures for macOS, Windows and Linux unsigned
+  packages. Platform and exact-artifact acceptance limitations are recorded in
+  [its release notes](releases/0.1.0-preview.4.md).
+
+- Complete [performance-input acceptance](TESTING.md#performance-input-acceptance)
+  in Ableton Live VST3 and REAPER VST3/CLAP: recording, replay, save/reopen,
+  host automation modes, mapping-only project dirty state, and cleanup. Confirm
+  144 parameters with ID 0 absent and released Trigger recall with editor closed.
+  Rapid taps within one block can collapse; do not claim lossless capture.
+  The [implementation plan](PERFORMANCE-INPUT-PLAN.md) remains pending DAW acceptance.
+- Current-build automated checks, five screenshot checks, CLAP/VST3 builds and
+  installed CLAP validation pass. Complete VST3 pluginval (not installed locally)
+  and installed-host checks before accepting this increment.
+- Linux needs a compatible CLAP/VST3 host smoke test before stable promotion;
+  LMMS cannot directly exercise the shipped formats. See [release inputs](releases/README.md).
 
 - Finish recorded type/macro automation and filter listening acceptance in
   `TESTING.md`. VST3 knob synchronization and type-default writes pass live host
@@ -109,12 +130,8 @@ This file tracks current product status. Architectural rationale belongs in
 
 ## Candidate product work
 
-- Complete remaining real-host acceptance before stable promotion; see
-  [release inputs](releases/README.md). Linux needs a compatible CLAP/VST3 host
-  smoke test, because LMMS cannot directly exercise the shipped formats.
-
 - Sample-accurate event segmentation.
-- User-remappable direct-key layouts after the physical default is validated.
+- Ordered rapid-event handling before claiming lossless sub-block pad taps.
 - Improved accessibility and general keyboard navigation outside performance
   mode.
 - Additional factory kits and kit-management workflow.
@@ -131,7 +148,7 @@ This file tracks current product status. Architectural rationale belongs in
 - Migration from archived C++ or WRAC project state.
 - Cross-framework preset interchange.
 - Maintaining old experimental product IDs or parameter layouts.
-- Replacing the 16-slot or kit v1 schema solely for the serial architecture.
+- Replacing the 16-slot schema solely for the serial architecture.
 - WebView or egui editor variants in this repository.
 - Sharing DSP implementation code with an archived port.
 

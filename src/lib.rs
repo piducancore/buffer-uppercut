@@ -1,4 +1,6 @@
 mod editor;
+mod input;
+mod keyboard;
 mod midi;
 mod params;
 
@@ -12,6 +14,9 @@ pub use params::BufferUppercutParams;
 use params::NUM_VISUALIZATION_BINS;
 
 const VISUALIZATION_REFRESH_HZ: f64 = 30.0;
+// Nonempty payload ensures TRUCE invokes the recall lifecycle even though all
+// durable configuration lives in parameters and persisted metadata.
+const STATE_MARKER: &[u8] = b"BUSTATE\x01";
 
 pub struct BufferUppercut {
     engine: Engine,
@@ -21,8 +26,7 @@ pub struct BufferUppercut {
     output_r: Vec<f64>,
     held_pads_by_channel: [u16; 16],
     previous_held: [bool; NUM_PADS],
-    performance_pitch: f64,
-    last_parameter_pitch: f64,
+    active_pitch_shift: f64,
     last_tempo: f64,
     sample_rate: f64,
     visualization_countdown: usize,
@@ -40,8 +44,7 @@ impl Default for BufferUppercut {
             output_r: Vec::new(),
             held_pads_by_channel: [0; 16],
             previous_held: [false; NUM_PADS],
-            performance_pitch: 0.0,
-            last_parameter_pitch: 0.0,
+            active_pitch_shift: 0.0,
             last_tempo: 120.0,
             sample_rate: 44_100.0,
             visualization_countdown: 0,
@@ -55,7 +58,43 @@ impl PluginLogic for BufferUppercut {
     type Params = BufferUppercutParams;
     type DspState = Self;
 
+    fn init(_: &Self::Params, context: &truce::core::tasks::InitContext) -> Self::DspState {
+        // The payload is constant. Publish at construction so a host save
+        // before the first audio block has exactly the same bytes as later saves.
+        if let Some(publisher) = context.snapshot_publisher() {
+            publisher.publish(STATE_MARKER.to_vec());
+        }
+        Self::default()
+    }
+
+    fn save_state(_: &Self::DspState) -> Vec<u8> {
+        STATE_MARKER.to_vec()
+    }
+
+    fn snapshot_into(_: &Self::DspState, buf: &mut Vec<u8>) -> bool {
+        buf.extend_from_slice(STATE_MARKER);
+        true
+    }
+
+    fn snapshot_version(_: &Self::DspState) -> Option<u64> {
+        Some(1)
+    }
+
+    fn load_state(
+        _: &mut Self::DspState,
+        data: &[u8],
+    ) -> Result<(), truce::core::state::StateLoadError> {
+        if data == STATE_MARKER {
+            Ok(())
+        } else {
+            Err(truce::core::state::StateLoadError::Malformed(
+                "Buffer Uppercut state marker",
+            ))
+        }
+    }
+
     fn reset(state: &mut Self::DspState, params: &Self::Params, config: &AudioConfig) {
+        release_restored_triggers(params);
         state.engine.reset(config.sample_rate);
         state.input_l.resize(config.max_block_size, 0.0);
         state.input_r.resize(config.max_block_size, 0.0);
@@ -67,11 +106,8 @@ impl PluginLogic for BufferUppercut {
         params.clear_direct_key_holds();
         params.clear_pointer_holds();
         params.set_admission_pad_bits(0, 0);
-        state.performance_pitch = params
-            .get_plain(params::PARAM_PERFORMANCE_PITCH_ID)
-            .unwrap_or_default()
-            .clamp(-24.0, 24.0);
-        state.last_parameter_pitch = state.performance_pitch;
+        state.active_pitch_shift = 0.0;
+        params.set_active_pitch_shift(0.0);
         state.sample_rate = config.sample_rate.max(1.0);
         state.visualization_countdown = 0;
         state.kit_reset_sequence = params.kit_reset_sequence();
@@ -97,22 +133,20 @@ impl PluginLogic for BufferUppercut {
             state.kit_reset_sequence = kit_reset_sequence;
         }
         state.last_tempo = context.transport.tempo.max(1.0);
+        for event in events.iter() {
+            if let EventBody::ParamChange { id, .. } = event.body {
+                let offset = id.wrapping_sub(1);
+                if offset < 144 && offset % params::PAD_PARAMETER_STRIDE == 0 {
+                    params.admit_trigger_input((offset / params::PAD_PARAMETER_STRIDE) as usize);
+                }
+            }
+        }
         if let Some(pad) = midi::apply_events(&mut state.held_pads_by_channel, events) {
             params.record_midi_pad_press(pad);
         }
         params.set_midi_held_pad_bits(aggregate_midi_held(&state.held_pads_by_channel));
 
-        let parameter_pitch = params
-            .get_plain(params::PARAM_PERFORMANCE_PITCH_ID)
-            .unwrap_or_default()
-            .clamp(-24.0, 24.0);
-        if parameter_pitch != state.last_parameter_pitch {
-            state.performance_pitch = parameter_pitch;
-            state.last_parameter_pitch = parameter_pitch;
-        }
-
         let mut performance = performance_state(params, &state.held_pads_by_channel);
-        let pitch_before_actions = state.performance_pitch;
         let pitch_trigger_held = (0..NUM_PADS).any(|pad| {
             performance.held[pad]
                 && performance.pads[pad].effect_type == EffectType::Pitch
@@ -125,25 +159,17 @@ impl PluginLogic for BufferUppercut {
                     if config.effect_type == EffectType::Pitch
                         && PitchRole::from_normalized(config.macros[0]).is_action()
                     {
-                        state.performance_pitch =
-                            apply_pitch_action(state.performance_pitch, config);
+                        state.active_pitch_shift =
+                            apply_pitch_action(state.active_pitch_shift, config);
                     }
                 }
             }
         } else {
-            state.performance_pitch = 0.0;
+            state.active_pitch_shift = 0.0;
         }
-        if state.performance_pitch != pitch_before_actions {
-            context.output_events.push(Event::new(
-                0,
-                EventBody::ParamChange {
-                    id: params::PARAM_PERFORMANCE_PITCH_ID,
-                    value: state.performance_pitch,
-                },
-            ));
-        }
+        params.set_active_pitch_shift(state.active_pitch_shift);
         state.previous_held = performance.held;
-        performance.performance_pitch = state.performance_pitch;
+        performance.active_pitch_shift = state.active_pitch_shift;
         state
             .engine
             .set_visualization_selected_slot(Some(params.visualization_selected_pad()));
@@ -203,19 +229,19 @@ impl PluginLogic for BufferUppercut {
     }
 
     fn state_changed(state: &mut Self::DspState, params: &Self::Params) {
+        release_restored_triggers(params);
         clear_transient_state(state, params);
-        let restored_pitch = params
-            .get_plain(params::PARAM_PERFORMANCE_PITCH_ID)
-            .unwrap_or_default()
-            .clamp(-24.0, 24.0);
-        state.performance_pitch = restored_pitch;
-        state.last_parameter_pitch = restored_pitch;
         state.kit_reset_sequence = params.kit_reset_sequence();
     }
 
     fn editor(params: Arc<Self::Params>) -> Box<dyn Editor> {
         editor::create(params)
     }
+}
+
+fn release_restored_triggers(params: &BufferUppercutParams) {
+    params.suppress_restored_triggers();
+    params.request_kit_reset();
 }
 
 fn clear_transient_state(state: &mut BufferUppercut, params: &BufferUppercutParams) {
@@ -226,6 +252,8 @@ fn clear_transient_state(state: &mut BufferUppercut, params: &BufferUppercutPara
     params.clear_direct_key_holds();
     params.clear_pointer_holds();
     params.set_admission_pad_bits(0, 0);
+    state.active_pitch_shift = 0.0;
+    params.set_active_pitch_shift(0.0);
     state.visualization_countdown = 0;
 }
 
@@ -242,8 +270,6 @@ fn performance_state(
     held_pads_by_channel: &[u16; 16],
 ) -> PerformanceState {
     let midi_held = aggregate_midi_held(held_pads_by_channel);
-    let direct_key_held = params.direct_key_held_pad_bits();
-    let pointer_held = params.pointer_held_pad_bits();
     let mut state = PerformanceState::default();
     for pad in 0..NUM_PADS {
         let effect_index = params
@@ -265,10 +291,10 @@ fn performance_state(
             .unwrap_or_default()
             >= 0.5;
         let bit = 1_u16 << pad;
-        state.held[pad] = trigger
-            || (midi_held & bit) != 0
-            || (direct_key_held & bit) != 0
-            || (pointer_held & bit) != 0;
+        if !trigger {
+            params.admit_trigger_input(pad);
+        }
+        state.held[pad] = (trigger && !params.trigger_is_suppressed(pad)) || (midi_held & bit) != 0;
     }
     state
 }
@@ -302,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn parameter_midi_direct_key_and_pointer_holds_are_aggregated_independently() {
+    fn trigger_is_authoritative_and_midi_remains_independent() {
         let params = BufferUppercutParams::default();
         params.set_plain(params::pad_trigger_id(2), 1.0);
         params.set_direct_keys_enabled(true);
@@ -312,16 +338,16 @@ mod tests {
         midi[15] = 1 << 7;
         let state = performance_state(&params, &midi);
         assert!(state.held[2]);
-        assert!(state.held[5]);
+        assert!(!state.held[5]);
         assert!(state.held[7]);
-        assert!(state.held[9]);
+        assert!(!state.held[9]);
 
         assert!(params.apply_direct_key(5, false, false));
         let state = performance_state(&params, &midi);
         assert!(state.held[2]);
         assert!(!state.held[5]);
         assert!(state.held[7]);
-        assert!(state.held[9]);
+        assert!(!state.held[9]);
 
         params.set_pointer_held(9, false);
         let state = performance_state(&params, &midi);
@@ -341,13 +367,13 @@ mod tests {
     #[test]
     fn f64_wrapper_processes_audio_through_live_parameters() {
         let params = BufferUppercutParams::default();
-        params.set_plain(params::pad_trigger_id(15), 1.0);
         let mut state = BufferUppercut::default();
         <BufferUppercut as PluginLogic>::reset(
             &mut state,
             &params,
             &AudioConfig::new(48_000.0, 128),
         );
+        params.set_plain(params::pad_trigger_id(15), 1.0);
 
         let input_l: Vec<f64> = (0..128)
             .map(|sample| (sample as f64 * 0.071).sin() * 0.8)
@@ -454,7 +480,7 @@ mod tests {
         <BufferUppercut as PluginLogic>::reset(&mut state, &params, &AudioConfig::new(8_000.0, 8));
         params.set_direct_keys_enabled(true);
         for pad in 0..7 {
-            assert!(params.apply_direct_key(pad, true, false));
+            params.set_plain(params::pad_trigger_id(pad), 1.0);
         }
 
         let input_l = [0.0; 8];
@@ -511,37 +537,135 @@ mod tests {
             );
         };
 
-        assert!(params.apply_direct_key(10, true, false));
-        assert!(params.apply_direct_key(9, true, false));
+        params.set_plain(params::pad_trigger_id(10), 1.0);
+        params.set_plain(params::pad_trigger_id(9), 1.0);
         run_block(&mut state, &mut output_events);
-        assert_eq!(state.performance_pitch, -1.0);
+        assert_eq!(state.active_pitch_shift, -1.0);
         run_block(&mut state, &mut output_events);
-        assert_eq!(state.performance_pitch, -1.0);
+        assert_eq!(state.active_pitch_shift, -1.0);
 
-        assert!(params.apply_direct_key(9, false, false));
+        params.set_plain(params::pad_trigger_id(9), 0.0);
         run_block(&mut state, &mut output_events);
-        assert!(params.apply_direct_key(9, true, false));
+        params.set_plain(params::pad_trigger_id(9), 1.0);
         run_block(&mut state, &mut output_events);
-        assert_eq!(state.performance_pitch, -2.0);
+        assert_eq!(state.active_pitch_shift, -2.0);
 
-        assert!(params.apply_direct_key(10, false, false));
+        params.set_plain(params::pad_trigger_id(10), 0.0);
         run_block(&mut state, &mut output_events);
-        assert_eq!(state.performance_pitch, 0.0);
-        assert_eq!(output_events.len(), 3);
+        assert_eq!(state.active_pitch_shift, 0.0);
+        assert_eq!(params.active_pitch_shift(), 0);
+        assert!(output_events.is_empty());
     }
 
     #[test]
-    fn restored_parameter_resynchronizes_internal_performance_pitch() {
+    fn state_restore_clears_transient_active_pitch_shift() {
         let params = BufferUppercutParams::default();
-        params.set_plain(params::PARAM_PERFORMANCE_PITCH_ID, -7.0);
         let mut state = BufferUppercut {
-            performance_pitch: 3.0,
-            last_parameter_pitch: 3.0,
+            active_pitch_shift: 3.0,
             ..BufferUppercut::default()
         };
+        params.set_active_pitch_shift(3.0);
+        for pad in 0..NUM_PADS {
+            params.set_plain(params::pad_trigger_id(pad), 1.0);
+        }
         <BufferUppercut as PluginLogic>::state_changed(&mut state, &params);
-        assert_eq!(state.performance_pitch, -7.0);
-        assert_eq!(state.last_parameter_pitch, -7.0);
+        assert_eq!(state.active_pitch_shift, 0.0);
+        assert_eq!(params.active_pitch_shift(), 0);
+        assert!(
+            !performance_state(&params, &[0; 16])
+                .held
+                .iter()
+                .any(|held| *held)
+        );
+        // Later host playback still controls Trigger normally.
+        params.set_plain(params::pad_trigger_id(10), 1.0);
+        params.admit_trigger_input(10);
+        assert!(performance_state(&params, &[0; 16]).held[10]);
+    }
+
+    #[test]
+    fn within_block_trigger_tap_is_a_documented_snapshot_limitation() {
+        let params = BufferUppercutParams::default();
+        params.set_plain(params::pad_trigger_id(9), 1.0);
+        params.set_plain(params::pad_trigger_id(9), 0.0);
+        assert!(!performance_state(&params, &[0; 16]).held[9]);
+    }
+
+    #[test]
+    fn fresh_host_event_reactivates_a_suppressed_recalled_trigger() {
+        let params = BufferUppercutParams::default();
+        params.set_plain(params::pad_type_id(0), EffectType::Gate as u8 as f64);
+        params.set_plain(params::pad_trigger_id(0), 1.0);
+        let mut state = BufferUppercut::default();
+        <BufferUppercut as PluginLogic>::reset(&mut state, &params, &AudioConfig::new(8000.0, 8));
+        assert!(!performance_state(&params, &[0; 16]).held[0]);
+        let input = [0.1; 8];
+        let inputs = [&input[..]];
+        let mut output = [0.0; 8];
+        let mut outputs = [&mut output[..]];
+        let mut buffer = AudioBuffer::from_slices_checked(&inputs, &mut outputs, 8);
+        let mut events = EventList::with_capacity(1);
+        events.push(Event::new(
+            0,
+            EventBody::ParamChange {
+                id: params::pad_trigger_id(0),
+                value: 1.0,
+            },
+        ));
+        let mut output_events = EventList::with_capacity(0);
+        let transport = TransportInfo::for_screenshot();
+        let mut context = ProcessContext::new(&transport, 8000.0, 8, &mut output_events);
+        <BufferUppercut as PluginLogic>::process(
+            &mut state,
+            &params,
+            &mut buffer,
+            &events,
+            &mut context,
+        );
+        assert!(performance_state(&params, &[0; 16]).held[0]);
+        assert_eq!(params.admission_pad_bits().0, 1);
+    }
+
+    #[test]
+    fn host_snapshot_restores_mapping_and_sound_but_releases_saved_triggers() {
+        use truce::core::export::PluginExport;
+        use truce::core::state::{restore_plugin, snapshot_plugin};
+        let plugin = Plugin::create();
+        assert_eq!(plugin.snapshot_slot().read(), Some(STATE_MARKER.to_vec()));
+        let params = plugin.params();
+        params.set_plain(params::pad_trigger_id(10), 1.0);
+        params.set_plain(params::pad_control_id(0, 0), 0.73);
+        let mut map = buffer_uppercut_kit::KeyMap::default();
+        map.swap(0, 15).unwrap();
+        params.set_key_map(map);
+        let bytes = snapshot_plugin(&plugin);
+        let mut restored = Plugin::create();
+        restore_plugin(&mut restored, &bytes).unwrap();
+        assert_eq!(
+            restored.params().get_plain(params::pad_trigger_id(10)),
+            Some(1.0)
+        );
+        assert!(!performance_state(restored.params(), &[0; 16]).held[10]);
+        assert_eq!(snapshot_plugin(&restored), bytes);
+        assert_eq!(
+            restored.params().get_plain(params::pad_control_id(0, 0)),
+            Some(0.73)
+        );
+        assert_eq!(restored.params().key_map(), map);
+    }
+
+    #[test]
+    fn state_marker_snapshot_is_allocation_free_after_framework_prewarm() {
+        let state = BufferUppercut::default();
+        let mut bytes = Vec::with_capacity(256);
+        let (_, allocations) = truce::core::rt::audit(|| {
+            let _section = truce::core::rt::RtSection::enter();
+            assert!(<BufferUppercut as PluginLogic>::snapshot_into(
+                &state, &mut bytes
+            ));
+        });
+        assert_eq!(allocations, 0);
+        assert_eq!(bytes, STATE_MARKER);
     }
 
     #[test]

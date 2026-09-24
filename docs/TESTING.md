@@ -100,9 +100,73 @@ cargo test --locked -p buffer-uppercut-dsp --features rt-paranoid
 ```
 
 DSP unit coverage must inspect admission masks and internal lifecycle semantics
-that sample fixtures cannot express directly. Kit tests must keep version 1,
+that sample fixtures cannot express directly. Kit tests must keep version 3,
 16 slots, seven macros, independent repeated same-type configurations, and
-non-persistence of momentary held state.
+non-persistence of momentary held state, plus validated key-map round-trips.
+
+## Performance-input acceptance
+
+Status: implemented; real-DAW acceptance remains pending.
+Earlier editor/Pitch/preview evidence below does not verify this increment.
+
+### Current implementation evidence (2026-09-24)
+
+- Formatting, all-target/all-feature Clippy, workspace tests, `rt-paranoid`,
+  and CLAP/VST3 release builds pass. Host snapshot tests cover save before
+  processing, durable map/sound recall, suppressed saved holds, and byte-identical
+  resaving. The constant lifecycle marker publishes at construction.
+- All five size/captured/Vinyl screenshots were visually reviewed, updated for
+  mapping controls, and pass exact baseline checks. Minimum-size pad text was
+  adjusted to avoid clipping.
+- V1–V4 corpus checksums pass unchanged. Installed CLAP passes CLAP Validator.
+- CLAP and VST3 are installed, with executable SHA-256 hashes matching their
+  built bundles: CLAP `a8a6fc32c08c2b645f23afc14ed3ccef467509fc323a5146254f392cb7e4b3e2`;
+  VST3 `602362ce5bd8753d86ff3d779d1f5c6f6389ca5be12f676e18e095b5689e36ee`.
+  VST3 pluginval could not run because the validator
+  is not installed. Interactive REAPER access timed out; no new real-host
+  recording/replay, mapping-dirty, or listening acceptance is claimed.
+- Released recall suppresses restored high Triggers rather than rewriting host
+  values. Rewriting those values failed host state-reproducibility validation;
+  suppression preserves the host state while preventing implicit resumed holds.
+
+### Remaining host checklist
+
+- Ableton Live VST3: enable Arrangement Automation Arm, record key and pointer
+  gestures, inspect Trigger 1/0 edges, replay without live input, then save/reopen
+  and replay. Test Session automation separately and record its settings.
+- REAPER VST3 and CLAP: test recording/replay in write and touch modes, plus
+  read/latch behavior and live edits over an existing envelope. Identify host
+  version, OS, format, installed binary hash, and settings with each result.
+- Hold a key and the same pointer pad together; either individual release must
+  preserve the remaining local ownership. MIDI must remain independently held.
+  Record repeated Pitch Down/Up taps while a Trigger is held, including multiple
+  Pitch Triggers and final-Trigger release.
+- Stop recording while held, release after stopping, and restart playback.
+  Exercise focus loss, close/reopen, Direct Keys disable, factory recall, host
+  recall, and remapping while held. Check balanced gestures and no stale release
+  affecting a subsequent press.
+- Measure very short taps at several buffer sizes. Press/release within one
+  process block may collapse to released, including Pitch actions. Keep lossless
+  rapid-tap capture unaccepted until ordered event handling is implemented and
+  tested; emitting host edits alone does not prove capture or audible playback.
+- Learn an unused physical key, cancel learning, clear a binding, explicitly
+  swap an occupied assignment, and reset the layout. Learning must not play a
+  pad; repeats must not activate a newly assigned key until a fresh press.
+  Verify physical-position labels on a non-US layout and disabled/unmapped
+  passthrough. Inspect mapping controls at minimum/default/wide sizes.
+- Change only a mapping in a saved project and check that the host marks the
+  project modified. Save/reopen and compare map, kit name, all sound parameters,
+  and labels. Factory recall must restore its authored map.
+- Save while Trigger is held, then recall with editor open and closed. All
+  audible holds and Active Shift must start released/zero even if host Trigger
+  values remain high for state reproducibility; subsequent timeline automation
+  must still play. Confirm exactly 144 host parameters and no ID 0.
+- Compare native v3 codec and host state round-trips for the same sound values,
+  name, and custom map. Reject duplicate/unsupported mappings and older native
+  versions without partial map publication. The native-file codec has no
+  embedded import/export UI; use code-level adapters for that comparison.
+- Complete required checks, all committed screenshot checks, validators,
+  installation/hash verification, and installed-host testing for this build.
 
 ## Slint screenshots
 
@@ -210,7 +274,7 @@ Quit and reopen REAPER after installing a new build.
   changes the audio at 100% Wet. Loading Classic must retain these defaults.
 - Drag Wet on one pad, select another pad, and confirm the dial and numeric value
   agree. The next drag must start at the selected pad's value without jumping.
-- Repeat after editing the type knob and performance pitch, and after preset
+- Repeat after editing the type knob and after preset
   recall with the editor open.
 - Change Beat Repeat to Reverse, Filter, and Vinyl. Confirm all seven macros
   receive the new defaults, the held pad remains usable, and repeated pointer
@@ -336,10 +400,11 @@ host before making any Linux compatibility claim.
 
 ### Automation and state
 
-- Record and play back slot triggers, effect selection, macros, and performance
-  pitch.
+- Record and play back slot triggers, effect selection, and macros. Confirm
+  Active Shift does not appear as an automation parameter.
 - Confirm continuous controls produce clean begin/set/end gestures.
-- Save, close, and reopen the project; verify all 145 parameters and kit name.
+- Save, close, and reopen the project; verify durable sound values, kit name,
+  and key map. Momentary Trigger values recall released.
 - Confirm state restoration releases transient holds and clears processor,
   admission, rolling-history, and slot-history state.
 - Reopen the editor and verify selected effect labels/values are correct.
@@ -350,14 +415,15 @@ host before making any Linux compatibility claim.
 - Confirm each change selects slot 1, releases every input-source hold, clears
   admission and every history, and resets processor state.
 - Save and reload a kit with two same-type slots using different macros. Confirm
-  both configurations survive and the file remains kit version 1.
+  both configurations and a custom map survive native codec round-trip at
+  version 3. This is a codec check, not an embedded import/export workflow.
 
 ### Presets
 
 - Use REAPER's preset controls above the embedded editor to save the current
   complete plugin state.
-- Change kits and controls, load the saved host preset, and verify all 145
-  parameters and the displayed kit name are restored.
+- Change kits and controls, load the saved host preset, and verify durable sound
+  values, key map, and displayed kit name are restored; all Triggers start released.
 - Confirm the embedded editor contains no duplicate LOAD/SAVE buttons and opens
   no platform file dialogs.
 

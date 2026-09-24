@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use buffer_uppercut_dsp::{
     EffectType, FilterMode, PitchRole, VisualizationBin, VisualizationMode, default_pad_config,
@@ -15,8 +15,8 @@ use truce_slint::slint::{Model, ModelRc, SharedString, VecModel, include_modules
 use truce_slint::{PhysicalKeyboardEvent, SlintEditor};
 
 use crate::params::{
-    BufferUppercutParams, NUM_MACROS, NUM_PADS, PARAM_PERFORMANCE_PITCH_ID, WaveformSnapshot,
-    pad_control_id, pad_trigger_id, pad_type_id,
+    BufferUppercutParams, NUM_MACROS, NUM_PADS, WaveformSnapshot, pad_control_id, pad_trigger_id,
+    pad_type_id,
 };
 
 include_modules!();
@@ -63,7 +63,10 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
     params.initialize_direct_keys_enabled(standalone_direct_keys_default(
         std::env::current_exe().ok().as_deref(),
     ));
+    let input = Arc::new(Mutex::new(crate::input::PadInput::default()));
+    let keyboard_input = input.clone();
     let editor = SlintEditor::new(params.clone(), configured_editor_size(), move |state| {
+        input.lock().expect("pad input").attach(state.clone());
         let ui = BufferUppercutUi::new().expect("create Buffer Uppercut Slint editor");
         let editor_preview = configured_editor_preview();
         let selected_pad = Rc::new(Cell::new(
@@ -111,26 +114,44 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         apply_editor_preview(&ui, editor_preview);
 
         {
-            let state = state.clone();
-            ui.on_pitch_edit_began(move || state.begin_edit(PARAM_PERFORMANCE_PITCH_ID));
+            let input = input.clone();
+            let selected_pad = selected_pad.clone();
+            ui.on_learn_key(move || input.lock().expect("pad input").learn(selected_pad.get()));
         }
         {
-            let state = state.clone();
-            ui.on_pitch_value_changed(move |value| {
-                state.set_param(PARAM_PERFORMANCE_PITCH_ID, f64::from(value));
+            let input = input.clone();
+            ui.on_cancel_learn(move || input.lock().expect("pad input").cancel_learn());
+        }
+        {
+            let input = input.clone();
+            let selected_pad = selected_pad.clone();
+            ui.on_clear_key(move || {
+                input
+                    .lock()
+                    .expect("pad input")
+                    .clear_assignment(selected_pad.get())
             });
         }
         {
-            let state = state.clone();
-            ui.on_pitch_edit_ended(move || state.end_edit(PARAM_PERFORMANCE_PITCH_ID));
+            let input = input.clone();
+            ui.on_reset_keys(move || input.lock().expect("pad input").reset_layout());
         }
+        {
+            let input = input.clone();
+            ui.on_swap_keys(move || input.lock().expect("pad input").confirm_swap());
+        }
+
         {
             let auto_select_midi = auto_select_midi.clone();
             ui.on_auto_select_toggled(move |enabled| auto_select_midi.set(enabled));
         }
         {
             let state = state.clone();
+            let input = input.clone();
             ui.on_direct_keys_toggled(move |enabled| {
+                if !enabled {
+                    input.lock().expect("pad input").release_keys();
+                }
                 state.params().set_direct_keys_enabled(enabled);
             });
         }
@@ -138,12 +159,14 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
             let state = state.clone();
             let selected_pad = selected_pad.clone();
             let factory_kit_index = factory_kit_index.clone();
+            let input = input.clone();
             ui.on_previous_kit(move || {
                 let index = factory_kit_index
                     .get()
                     .unwrap_or(0)
                     .wrapping_add(FACTORY_KIT_COUNT - 1)
                     % FACTORY_KIT_COUNT;
+                input.lock().expect("pad input").release_all();
                 apply_kit(&state, &factory_kit(index), &selected_pad);
                 factory_kit_index.set(Some(index));
             });
@@ -152,8 +175,10 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
             let state = state.clone();
             let selected_pad = selected_pad.clone();
             let factory_kit_index = factory_kit_index.clone();
+            let input = input.clone();
             ui.on_next_kit(move || {
                 let index = (factory_kit_index.get().unwrap_or(0) + 1) % FACTORY_KIT_COUNT;
+                input.lock().expect("pad input").release_all();
                 apply_kit(&state, &factory_kit(index), &selected_pad);
                 factory_kit_index.set(Some(index));
             });
@@ -161,17 +186,21 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         {
             let state = state.clone();
             let selected_pad = selected_pad.clone();
+            let input = input.clone();
             ui.on_pad_pressed(move |pad| {
                 let pad = valid_pad_index(pad);
                 selected_pad.set(pad);
                 state.params().set_visualization_selected_pad(pad);
-                state.params().set_pointer_held(pad, true);
+                input.lock().expect("pad input").pointer(pad, true);
             });
         }
         {
-            let state = state.clone();
+            let input = input.clone();
             ui.on_pad_released(move |pad| {
-                state.params().set_pointer_held(valid_pad_index(pad), false);
+                input
+                    .lock()
+                    .expect("pad input")
+                    .pointer(valid_pad_index(pad), false);
             });
         }
         {
@@ -279,7 +308,15 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         }
 
         let waveform = Rc::new(RefCell::new(WaveformSnapshot::default()));
+        let input = input.clone();
         Box::new(move |state: &PluginContext<BufferUppercutParams>| {
+            {
+                let mut input = input.lock().expect("pad input");
+                input.synchronize();
+                ui.set_key_learning(input.learning_active());
+                ui.set_key_conflict(input.conflict_pending());
+                ui.set_key_status(SharedString::from(input.learning_status()));
+            }
             let (midi_press_sequence, pressed_pad) = state.params().midi_pad_press_event();
             if midi_press_sequence != last_midi_press_sequence.get() {
                 last_midi_press_sequence.set(midi_press_sequence);
@@ -313,24 +350,23 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
             );
             ui.set_tempo_text(tempo);
 
-            let pitch = state.get_param(PARAM_PERFORMANCE_PITCH_ID);
-            ui.set_pitch_value(pitch);
-            ui.set_pitch_text(SharedString::from(
-                state.format_param(PARAM_PERFORMANCE_PITCH_ID),
-            ));
+            let active_pitch_shift = state.params().active_pitch_shift();
+            ui.set_pitch_value((active_pitch_shift as f32 + 24.0) / 48.0);
+            ui.set_pitch_text(SharedString::from(format!("{active_pitch_shift} st")));
 
             let midi_held_bits = state.params().midi_held_pad_bits();
-            let direct_key_held_bits = state.params().direct_key_held_pad_bits();
-            let pointer_held_bits = state.params().pointer_held_pad_bits();
             let (active_pad_bits, suspended_pad_bits) = state.params().admission_pad_bits();
             for pad in 0..NUM_PADS {
                 let effect = selected_effect(state, pad);
-                let trigger_held = state.get_param(pad_trigger_id(pad)) >= 0.5;
+                let trigger_held = state.get_param(pad_trigger_id(pad)) >= 0.5
+                    && !state.params().trigger_is_suppressed(pad);
                 pads.set_row_data(
                     pad,
                     PadView {
                         number: SharedString::from(format!("{:02}", pad + 1)),
-                        key: SharedString::from(physical_key_label(pad)),
+                        key: SharedString::from(
+                            state.params().key_map().key(pad).expect("pad").label(),
+                        ),
                         note: SharedString::from(format!("{}", pad + 60)),
                         effect: SharedString::from(pad_effect_abbreviation(
                             effect,
@@ -338,8 +374,6 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                         )),
                         held: trigger_held
                             || midi_held_bits & (1_u16 << pad) != 0
-                            || direct_key_held_bits & (1_u16 << pad) != 0
-                            || pointer_held_bits & (1_u16 << pad) != 0
                             || editor_preview.and_then(EditorPreview::held_pad) == Some(pad),
                         active: active_pad_bits & (1_u16 << pad) != 0,
                         suspended: suspended_pad_bits & (1_u16 << pad) != 0,
@@ -391,17 +425,24 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
     .resizable(true)
     .min_size((920, 620))
     .physical_keyboard_input({
-        let params = params.clone();
         move |event| match event {
             PhysicalKeyboardEvent::Key {
                 code,
                 pressed,
                 repeat,
-            } => crate::midi::pad_for_physical_key(code)
-                .is_some_and(|pad| params.apply_direct_key(pad, pressed, repeat)),
-            PhysicalKeyboardEvent::FocusChanged(false) | PhysicalKeyboardEvent::EditorClosed => {
-                params.clear_direct_key_holds();
-                params.clear_pointer_holds();
+            } => crate::keyboard::key_for_code(code).is_some_and(|key| {
+                keyboard_input
+                    .lock()
+                    .expect("pad input")
+                    .key(key, pressed, repeat)
+            }),
+            PhysicalKeyboardEvent::FocusChanged(false) => {
+                let mut input = keyboard_input.lock().expect("pad input");
+                input.focus_lost();
+                false
+            }
+            PhysicalKeyboardEvent::EditorClosed => {
+                keyboard_input.lock().expect("pad input").detach();
                 false
             }
             PhysicalKeyboardEvent::FocusChanged(true) => false,
@@ -413,10 +454,6 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
 }
 
 fn apply_kit(state: &PluginContext<BufferUppercutParams>, kit: &Kit, selected_pad: &Cell<usize>) {
-    state.automate(
-        PARAM_PERFORMANCE_PITCH_ID,
-        (kit.state.performance_pitch.clamp(-24.0, 24.0) + 24.0) / 48.0,
-    );
     for pad in 0..NUM_PADS {
         state.automate(pad_trigger_id(pad), 0.0);
         state.automate(
@@ -434,6 +471,8 @@ fn apply_kit(state: &PluginContext<BufferUppercutParams>, kit: &Kit, selected_pa
         }
     }
     state.params().set_kit_name(&kit.name);
+    state.params().set_key_map(kit.key_map);
+    state.mark_state_dirty();
     state.params().clear_direct_key_holds();
     state.params().clear_pointer_holds();
     state.params().request_kit_reset();

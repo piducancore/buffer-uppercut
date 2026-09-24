@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "buffer-uppercut"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 dependencies = [
  "buffer-uppercut-dsp",
  "buffer-uppercut-kit",
@@ -568,11 +568,11 @@ dependencies = [
 
 [[package]]
 name = "buffer-uppercut-dsp"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 
 [[package]]
 name = "buffer-uppercut-kit"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 dependencies = [
  "buffer-uppercut-dsp",
 ]
@@ -5095,8 +5095,6 @@ dependencies = [
 [[package]]
 name = "truce-core"
 version = "6.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ecd892fb0f82fdfbf801b4aab7f443f3c51deac572366b8bebfbda49117f1df"
 dependencies = [
  "backtrace",
  "crossbeam-queue",
@@ -5308,8 +5306,6 @@ checksum = "c16c39b3d4b34d50004d7e0e752344bb0c048207528adc72ca7118391eb3140e"
 [[package]]
 name = "truce-vst3"
 version = "6.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfd5cc181c93370a99a684def63f1c80241f07945a2b2a11205e4de259cdbc63"
 dependencies = [
  "cc",
  "crossbeam-queue",

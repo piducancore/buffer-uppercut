@@ -243,7 +243,7 @@ impl Default for PadConfig {
 pub struct PerformanceState {
     pub pads: [PadConfig; NUM_PADS],
     pub held: [bool; NUM_PADS],
-    pub performance_pitch: f64,
+    pub active_pitch_shift: f64,
 }
 
 impl Default for PerformanceState {
@@ -251,7 +251,7 @@ impl Default for PerformanceState {
         Self {
             pads: [PadConfig::default(); NUM_PADS],
             held: [false; NUM_PADS],
-            performance_pitch: 0.0,
+            active_pitch_shift: 0.0,
         }
     }
 }
@@ -899,7 +899,7 @@ impl Engine {
                         &config,
                         self.sample_rate,
                         samples_per_beat,
-                        state.performance_pitch,
+                        state.active_pitch_shift,
                     );
                 }
                 if config.effect_type.is_buffer() {
@@ -1071,7 +1071,7 @@ impl Engine {
         config: &PadConfig,
         sample_rate: f64,
         samples_per_beat: f64,
-        performance_pitch: f64,
+        active_pitch_shift: f64,
     ) -> [f64; 2] {
         match config.effect_type {
             EffectType::BeatRepeat | EffectType::Reverse | EffectType::TapeStop => {
@@ -1082,7 +1082,7 @@ impl Engine {
             }
             EffectType::Pitch => {
                 slot.pitch
-                    .process(stage_input, performance_pitch, config, sample_rate)
+                    .process(stage_input, active_pitch_shift, config, sample_rate)
             }
             EffectType::Filter => Self::apply_filter(slot, stage_input, config, sample_rate),
             EffectType::LoFi => Self::apply_lofi(slot, stage_input, config, sample_rate),
@@ -1810,7 +1810,7 @@ mod tests {
         let mut trigger_state = PerformanceState::default();
         trigger_state.pads[0] = pitch_config(PitchRole::Trigger, 1.0);
         trigger_state.held[0] = true;
-        trigger_state.performance_pitch = 7.0;
+        trigger_state.active_pitch_shift = 7.0;
         let mut engine = Engine::new(8_000.0);
         let mut shifted = vec![0.0; input.len()];
         let mut right = vec![0.0; input.len()];
@@ -1844,10 +1844,10 @@ mod tests {
         state.pads[0] = default_pad_config(EffectType::BeatRepeat);
         state.held[0] = true;
 
-        let render = |performance_pitch| {
+        let render = |active_pitch_shift| {
             let mut engine = Engine::new(8_000.0);
             let mut state = state;
-            state.performance_pitch = performance_pitch;
+            state.active_pitch_shift = active_pitch_shift;
             let mut left = vec![0.0; input.len()];
             let mut right = vec![0.0; input.len()];
             engine.process(&input, &input, &mut left, &mut right, 120.0, &state);

@@ -18,11 +18,13 @@ Identity is defined in `truce.toml`; do not duplicate it in source code.
 
 ## Parameter and slot schema
 
-There are exactly 145 automatable parameters:
+There are exactly 144 automatable parameters:
 
-- ID `0`: performance pitch, discrete `-24..24` semitones
 - IDs `1..144`: 16 performance slots × 9 parameters
 - each slot: momentary trigger, effect type, seven normalized macros
+
+ID `0` is intentionally unused. Removing the former Performance Pitch
+parameter does not renumber any slot parameter.
 
 For zero-based slot `p`:
 
@@ -74,15 +76,16 @@ Pitch is one effect at value 5 with seven normalized controls:
 
 Only a held Trigger role enters the serial audio chain. While at least one
 Trigger is held, each new Down or Up press subtracts or adds that action pad's
-Step once. The active shift is clamped to −24…+24 semitones. Releasing the last
-Trigger resets it to zero. Down and Up roles do not enter the chain or consume
-admission capacity.
+Step once. The active shift is clamped to −24…+24 semitones. It is transient
+runtime state, not a host parameter or preset field. Releasing the last Trigger
+resets it to zero. Down and Up roles do not enter the chain or consume admission
+capacity.
 
 Pitch uses a tempo-preserving dual-grain stereo delay. Each slot owns an
 independent 140 ms `f64` delay prepared during reset. Suspension freezes it;
 release, role or type change, kit reset, and state restoration invalidate its
 stored samples in constant time. The Classic S, D, and F pads are Down, Trigger,
-and Up with one-semitone steps. The editor shows the accumulated host parameter
+and Up with one-semitone steps. The editor shows the accumulated transient value
 as the read-only **Active Shift** indicator.
 
 Beat Repeat and Reverse keep an independent **Slice Pitch** macro. It changes
@@ -184,8 +187,8 @@ numbers:
 The three Pitch roles also accept `57..59` and `81..83`. MIDI held state is
 independent for all 16 MIDI channels before channel masks are aggregated.
 
-The direct computer-key layout follows physical positions, not layout-produced
-characters:
+The default direct computer-key layout follows physical positions, not
+layout-produced characters:
 
 | Slots | Physical key positions |
 | ----- | ---------------------- |
@@ -195,17 +198,43 @@ characters:
 | 13–16 | `Z` `X` `C` `V`        |
 
 The editor control is labeled **DIRECT KEYS**. It is runtime editor state, not
-one of the 145 host parameters. It is disabled by default for CLAP and VST3
+one of the 144 host parameters. It is disabled by default for CLAP and VST3
 instances and enabled by default in the standalone development host. Disabling
 it, or pressing an unmapped key, must leave host/DAW keyboard handling
 available. MIDI, automation, and pointer operation remain supported in every
 target.
+
+Each slot has one configurable physical key or no assignment. Stable product
+identifiers are `0` for unassigned, `1..26` for A–Z, `27..36` for digits 0–9,
+and `37..47` for Minus, Equal, BracketLeft, BracketRight, Backslash, Semicolon,
+Quote, Backquote, Comma, Period, and Slash respectively. Duplicate nonzero IDs
+and unsupported IDs are rejected before publication. Labels use US physical
+position names; they do not promise the active layout's produced character.
+
+Learn captures an assignment without playing its pad. An occupied assignment
+requires an explicit swap. Clear unassigns the selected slot; Reset Layout
+restores the default map. Assignment changes release local gestures and require
+a fresh press. Factory kits and both persistence paths carry the map. Direct
+Keys enablement remains runtime policy and is not recalled from either format.
+
+Key and pointer ownership combine into one local gesture per pad: the first
+press begins a host edit and writes Trigger 1; the final local release writes 0
+and ends the edit. Host Trigger values determine playback and live local sound;
+local holds are not a second audio source. Therefore host read/touch/latch modes
+control interaction with existing automation. MIDI remains an independent hold
+source and is not copied into outgoing automation. Recording depends on DAW
+automation settings; track recording alone is not a recording guarantee.
 
 ## Event timing
 
 MIDI, parameter, direct-key, and transport changes apply at process-block
 boundaries. Sample-accurate event segmentation is deferred. Code and tests must
 not imply sample-accurate effect starts until that architecture is implemented.
+
+A press and release within one process block may collapse to the final released
+value. This can lose a rapid Pitch action as well as a short continuous-effect
+tap. No lossless rapid-tap recording/playback claim is made; DAW acceptance and
+ordered within-block event handling remain open work.
 
 When several new continuous requests are observed in one block, admission is
 deterministic. Admission recency affects cap overflow and restoration only; the
@@ -277,6 +306,15 @@ Activation means plugin or DSP activation/reset, not admission of a held slot.
 Restoring a suspended slot therefore does not clear history or restart its
 processor.
 
+Activation and host recall suppress existing high Trigger values,
+including when a project was saved during a held performance and the editor is
+closed. Host parameter values round-trip unchanged; they do not themselves
+resume a saved performance. A fresh Trigger automation event or local pad press
+removes that slot's suppression; observing a low value also rearms it. MIDI
+remains independent. Later timeline automation remains able to activate pads. Local gesture
+cleanup also covers focus loss, editor close, Direct Keys disable, mapping
+replacement, and kit/host recall; stale releases cannot own a new gesture.
+
 ## Real-time safety
 
 `process` and its callees must perform no allocation, resizing, locking, logging,
@@ -316,23 +354,37 @@ frozen expected-output file.
 
 ## Native kit format
 
-`.bupreset` remains version 1. It contains:
+New host snapshots carry a fixed `BUSTATE` plus byte `1` lifecycle marker so
+TRUCE invokes the released-state restore hook. Earlier markerless host states
+are outside that guarantee; no migration is provided. The marker contains no
+performance state and is separate from the native file format below.
+
+`.bupreset` version 3 contains:
 
 1. eight-byte `BUPRESET` magic;
 2. little-endian `u32` version, slot count, macro count, and UTF-8 name length;
 3. at most 63 bytes of UTF-8 kit name;
-4. little-endian `f64` performance pitch;
-5. for each of 16 slots, a `u32` effect type and seven little-endian `f64`
-   normalized macros.
+4. for each of 16 slots, a `u32` effect type and seven little-endian `f64`
+   normalized macros;
+5. sixteen one-byte physical-key identifiers, one per slot.
 
 The decoder rejects unsupported versions/layouts, invalid UTF-8, non-finite or
 out-of-range values, truncation, and trailing bytes. Files are capped at 4096
 bytes. The format already represents independent repeated same-type slots, so
 the serial architecture does not require a kit schema version change.
 
-Portable kits do not preserve momentary trigger or input-source held state. Kit
-application resets performance pitch to zero, selects slot 1, releases all held
-sources, resets admission and processor state, and clears every DSP history.
+Portable kits do not preserve Active Shift, momentary trigger, or input-source
+held state. Kit application resets Active Shift to zero, selects slot 1,
+releases all held sources, resets admission and processor state, and clears
+every DSP history. Versions 1 and 2 are intentionally rejected. Version 3 adds
+the validated key map; the former Performance Pitch field remains absent.
+
+Host state and native kits restore the same durable sound configuration, kit
+name, and key map. Host envelopes additionally contain the framework's parameter
+representation; recalled Trigger holds are suppressed as described above. Key maps use
+host persisted metadata rather than new automatable parameters. Configuration
+edits notify the host that state has changed. Native-file import/export has no
+embedded editor UI in this increment.
 
 ## Editor behavior
 
@@ -341,9 +393,9 @@ sources, resets admission and processor state, and clears every DSP history.
   slot state.
 - Auto-select MIDI is editor-session state, defaults on, and selects a slot on
   MIDI press.
-- Pointer press selects and activates a slot; release ends only the pointer's
-  contribution to its aggregate hold.
-- Direct keys use the physical four-by-four layout and honor the target-specific
+- Pointer press selects a slot and joins its local host Trigger gesture; release
+  ends the gesture only after the last local key/pointer source releases.
+- Direct keys use the configured physical map and honor the target-specific
   default policy above.
 - Pads remain the primary visual surface. Rolling waveform history is secondary.
 - When several held buffer slots qualify for captured visualization, the

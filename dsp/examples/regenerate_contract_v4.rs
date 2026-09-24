@@ -215,7 +215,7 @@ fn render_fixture(fixture: &Fixture) -> String {
         .unwrap();
         let mut state = PerformanceState {
             pads: fixture.pads,
-            performance_pitch: block.pitch,
+            active_pitch_shift: block.pitch,
             ..PerformanceState::default()
         };
         for pad in 0..NUM_PADS {

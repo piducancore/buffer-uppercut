@@ -41,3 +41,9 @@ Current records:
   governs Astro, GitHub Pages and release-backed public downloads.
 - [0012 — MIT original code and unsigned preview distribution](0012-mit-and-unsigned-previews.md)
   governs licensing, unsigned preview packages and publication gates.
+- [0013 — Active Shift is transient performance state](0013-active-shift-is-transient.md)
+  removes the former global host parameter and native-preset field while
+  retaining the held Pitch gesture.
+- [0014 — Host Trigger gestures and durable key maps](0014-performance-input-and-key-maps.md)
+  governs local gesture automation, physical-key assignment, unified durable
+  persistence, and released recall; host recording acceptance remains pending.

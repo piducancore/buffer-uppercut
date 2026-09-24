@@ -53,7 +53,7 @@ Each processing fixture is UTF-8, tab-separated text containing:
 - a versioned `BUDSP_CONTRACT` header;
 - `sample_rate` and `channels` metadata;
 - all 16 slot effect numbers and seven normalized macros;
-- ordered blocks with tempo, a 16-bit held-slot mask, performance pitch, and
+- ordered blocks with tempo, a 16-bit held-slot mask, transient Active Shift, and
   frame count; and
 - planar input and expected output samples as round-trippable decimal `f64`.
 

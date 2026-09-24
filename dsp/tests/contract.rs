@@ -139,7 +139,7 @@ fn matches_every_canonical_serial_processing_fixture() {
         for (block_index, block) in fixture.blocks.iter().enumerate() {
             let mut state = PerformanceState {
                 pads: fixture.pads,
-                performance_pitch: block.pitch,
+                active_pitch_shift: block.pitch,
                 ..PerformanceState::default()
             };
             for pad in 0..NUM_PADS {

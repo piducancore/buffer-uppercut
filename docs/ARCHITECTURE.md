@@ -37,9 +37,12 @@ dependencies.
 | --- | --- | --- |
 | `dsp/` | serial audio engine, per-slot runtime state and history, admission state, effect behavior, control metadata, visualization extraction | TRUCE, UI, files, host events |
 | `kit/` | factory-kit definitions and `.bupreset` codec | file dialogs, automation, host state |
+| `kit/src/keys.rs` | stable physical-key identifiers and validated maps | platform keyboard and host types |
 | `src/lib.rs` | plugin lifecycle, processing, host transport/events, input aggregation, parameter-to-DSP translation | visual layout, file dialogs |
 | `src/params.rs` | parameter schema, persisted editor metadata, atomic MIDI/admission/waveform publication | effect processing |
 | `src/midi.rs` | note mapping and independent per-channel held masks | parameters, DSP |
+| `src/keyboard.rs` | physical-key conversion | MIDI or DSP behavior |
+| `src/input.rs` | local key/pointer ownership and host performance gestures | DSP processing |
 | `src/editor.rs` | host automation gestures, direct-key adapter, factory-kit application, waveform path construction | audio processing, file dialogs |
 | `ui/` | Slint components, visual hierarchy, responsive layout | plugin or DSP logic |
 | `vendor/` | documented narrow framework backports | product behavior |
@@ -57,9 +60,9 @@ For every process block:
 
 1. Read host tempo.
 2. Apply MIDI events to 16 independent channel-held masks.
-3. Aggregate direct-key, MIDI, automatable trigger, and pointer holds into one
-   held state per slot. Releasing one source does not release another source's
-   hold.
+3. Aggregate MIDI and automatable Trigger values into one held state per slot.
+   The editor sends combined local key/pointer gestures through Trigger; MIDI
+   remains independently held.
 4. Detect held Pitch Trigger roles. While a Trigger is held, apply Down and Up
    roles once per aggregate released-to-held transition; reset Active Shift when
    the final Trigger releases. Action roles do not enter the audio chain.
@@ -97,7 +100,7 @@ admission and resets its processor state, but a configured buffer history keeps
 recording and is available to the next press.
 
 Pitch is one configurable effect. A Trigger role is a continuous dual-grain
-stage; Down and Up roles are edge-triggered host parameter actions while any
+stage; Down and Up roles are edge-triggered performance actions while any
 Trigger is held. Off and Pitch action roles do not consume the continuous cap.
 
 ## Grain Pitch processor
@@ -142,7 +145,7 @@ A S D F
 Z X C V
 ```
 
-These positions map to slots 1 through 16 row by row. The mapping is physical,
+These default positions map to slots 1 through 16 row by row. The mapping is physical,
 not dependent on the character produced by the active keyboard layout. The
 editor exposes it as **DIRECT KEYS**. It is opt-in for CLAP and VST3 instances
 so DAW shortcuts and host virtual MIDI keyboards remain available by default.
@@ -151,17 +154,32 @@ and pointer input remain available in every target. Framework support for
 physical identity remains generic; product mapping belongs in the Buffer
 Uppercut integration layer, not `vendor/truce-slint`.
 
+`kit/src/keys.rs` validates stable product identifiers and supplies display
+labels. The wrapper converts physical backend codes and owns the local gesture
+dispatcher. Each key-down captures a slot; key repeats do not retrigger. Pointer
+and key ownership share one begin/Trigger-1/Trigger-0/end host gesture per pad.
+The audio path reads the Trigger parameter and independent MIDI state, without
+mirroring private UI holds into a second audio source. Host automation mode
+therefore governs live edits during playback.
+
+Learn, Clear, Reset Layout, and explicit conflict swaps edit the same map used
+by labels and dispatch. Cleanup invalidates local ownership across focus loss,
+close, disable, mapping edits, and recall. Very short taps may collapse within
+one process block; the current routing does not add sample-accurate segmentation.
+
 ## Parameters and host state
 
-`BufferUppercutParams` is the host-facing source of truth. It contains 145
-automatable parameters. `kit_name` is persisted metadata and does not change the
-parameter count. Direct-key enablement, MIDI illumination, input held-state
+`BufferUppercutParams` is the host-facing source of truth. It contains 144
+automatable slot parameters at IDs `1..144`; ID `0` is intentionally unused.
+`kit_name` and the validated key map are persisted metadata and do not change
+the parameter count.
+Direct-key enablement, MIDI illumination, Active Shift, input held-state
 bridges, admission status, kit reset sequence, and waveform frames are runtime
 fields.
 
-The DSP never mutates the parameter store. The wrapper emits a host
-`ParamChange` event when Pitch actions change Active Shift or Trigger release
-returns it to zero, allowing each wrapper to record the change correctly.
+The DSP never mutates the parameter store. Pitch actions update a transient
+Active Shift value in the wrapper and publish it atomically for the read-only
+editor indicator. It is not automatable or persisted.
 
 ## Kit and state flow
 
@@ -169,9 +187,9 @@ Factory navigation and kit application run on the UI thread:
 
 ```text
 factory selection
-        -> validated 16-slot Kit v1
+        -> validated 16-slot Kit v3 with key map
         -> normalized host automation writes
-        -> persisted kit name
+        -> persisted kit name and key map
         -> release all input sources
         -> atomic reset sequence
         -> audio-thread transient/history clear at next block
@@ -182,6 +200,11 @@ held slots, reset admission and per-slot processor state, and clear rolling and
 per-slot histories without resizing prepared storage. Transport start, stop,
 seek, tempo, and position changes preserve histories, processor state, and held
 or admission state.
+
+Host restoration and activation suppress recalled Trigger holds without
+rewriting host parameter values. Host state and native kits represent the same durable sound
+configuration, name, and mapping; saved performance holds never resume merely
+because a preset was recalled. Subsequent timeline automation still applies.
 
 Complete plugin preset loading and saving belongs to the host-native preset UI
 supplied by the TRUCE wrappers. No platform file dialog is launched from the
@@ -219,16 +242,19 @@ active buffer slot wins. If neither exists, rolling history is displayed.
 | --- | --- | --- | --- |
 | host parameters | host/UI | audio/UI | TRUCE atomic parameter storage |
 | MIDI held masks | audio | audio/UI | per-channel state plus atomics |
-| direct-key held mask | UI input adapter | audio/UI | bounded atomic bridge |
+| local gesture ownership | UI input adapter | UI | bounded dispatcher state |
 | admission status | audio | UI | atomics |
 | waveform frame | audio | UI | sequence-checked atomics |
 | kit reset sequence | UI | audio | atomic counter |
-| kit name/editor settings | UI/host restore | UI/host save | non-audio synchronization, never read in `process` |
+| kit name/key map | UI/host restore | UI/host save | validated non-audio persistence, never read in `process` |
 | DSP engine | audio lifecycle | audio lifecycle | exclusive `DspState` access |
 
 ## Framework patches
 
-`vendor/truce-clap` contains a state-rescan backport.
+`vendor/truce-clap` contains a state-rescan backport and metadata-change host
+notification. `vendor/truce-core` and `vendor/truce-vst3` add the corresponding
+generic state-dirty bridge capability; the product uses it for mapping edits
+without fabricating unrelated automation writes.
 `vendor/truce-slint` contains window-handle, scale reconciliation, keyboard
 passthrough/physical-key capability, and renderer fixes required by the native
 editor. Each patch has a `PATCH.md` with its upstream boundary. Remove a patch

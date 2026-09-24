@@ -1,12 +1,12 @@
 [package]
 name = "buffer-uppercut"
-version = "0.1.0-preview.3"
+version = "0.1.0-preview.4"
 edition = "2024"
 license = "MIT"
 
 [workspace]
 members = [".", "dsp", "kit", "vendor/truce-slint"]
-exclude = ["vendor/truce-clap"]
+exclude = ["vendor/truce-clap", "vendor/truce-core", "vendor/truce-vst3"]
 resolver = "3"
 
 [lib]
@@ -55,6 +55,8 @@ truce-slint-build = { version = "6.3" }
 # Narrow exact-version wrapper backports. Remove each override after the
 # corresponding behavior ships upstream; see the PATCH.md in each directory.
 [patch.crates-io]
+truce-core = { path = "vendor/truce-core" }
+truce-vst3 = { path = "vendor/truce-vst3" }
 truce-clap = { path = "vendor/truce-clap" }
 truce-slint = { path = "vendor/truce-slint" }
 

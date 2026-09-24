@@ -26,9 +26,12 @@ Before changing code:
 - `dsp/src/lib.rs`: framework-neutral DSP, performance state, effect behavior,
   semantic control metadata, and visualization extraction.
 - `kit/src/lib.rs`: factory kits and native `.bupreset` serialization.
-- `src/params.rs`: the 145 host parameters, persisted editor metadata, and
+- `kit/src/keys.rs`: framework-neutral stable key identifiers and validated maps.
+- `src/params.rs`: the 144 host parameters at stable IDs `1..144`, persisted editor metadata, and
   atomic UI snapshots.
 - `src/midi.rs`: MIDI note mapping and per-channel held-state updates.
+- `src/keyboard.rs`: physical-key conversion.
+- `src/input.rs`: local key/pointer ownership and host performance gestures.
 - `src/lib.rs`: TRUCE `PluginLogic64`, host events, transport, preallocated
   wrapper buffers, and DSP integration.
 - `src/editor.rs`: automation-safe Slint bindings and UI-thread file access.

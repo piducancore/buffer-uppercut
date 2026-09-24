@@ -1,16 +1,47 @@
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU16, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 
 use buffer_uppercut_dsp::{
     EffectType as DspEffectType, VisualizationBin, VisualizationMeta, VisualizationMode,
 };
+use buffer_uppercut_kit::KeyMap;
+use truce::core::custom_state::{PersistField, StateCursor};
 use truce::prelude::*;
+
+/// Validated durable metadata. This lock is only accessed by editor/host state
+/// code, never by the audio callback.
+#[derive(Default)]
+struct PersistedKeyMap {
+    value: RwLock<KeyMap>,
+    generation: AtomicU32,
+}
+
+impl PersistField for PersistedKeyMap {
+    fn persist_write(&self, buf: &mut Vec<u8>) {
+        if let Ok(map) = self.value.read() {
+            buf.extend_from_slice(&map.ids());
+        }
+    }
+
+    fn persist_read(&self, cursor: &mut StateCursor) {
+        let Some(bytes) = cursor.read_bytes(NUM_PADS) else {
+            return;
+        };
+        let Ok(ids) = bytes.try_into() else { return };
+        let Ok(map) = KeyMap::from_ids(ids) else {
+            return;
+        };
+        if let Ok(mut value) = self.value.write() {
+            *value = map;
+            self.generation.fetch_add(1, Ordering::Release);
+        }
+    }
+}
 
 pub const NUM_PADS: usize = 16;
 pub const NUM_MACROS: usize = 7;
 pub const NUM_VISUALIZATION_BINS: usize = 256;
 pub const PAD_PARAMETER_STRIDE: u32 = 9;
-pub const PARAM_PERFORMANCE_PITCH_ID: u32 = 0;
 
 pub(crate) struct WaveformSnapshot {
     pub bins: [VisualizationBin; NUM_VISUALIZATION_BINS],
@@ -488,14 +519,6 @@ pad_params!(
 
 #[derive(Params)]
 pub struct BufferUppercutParams {
-    #[param(
-        id = 0,
-        name = "Performance Pitch",
-        range = "discrete(-24, 24)",
-        default = 0,
-        unit = "st"
-    )]
-    performance_pitch: IntParam,
     #[nested(base = 1)]
     pad_01: Pad01Params,
     #[nested(base = 10)]
@@ -530,6 +553,8 @@ pub struct BufferUppercutParams {
     pad_16: Pad16Params,
     #[persist]
     kit_name: RwLock<String>,
+    #[persist]
+    key_map: PersistedKeyMap,
     #[skip]
     midi_held_pad_bits: AtomicU16,
     #[skip]
@@ -542,6 +567,10 @@ pub struct BufferUppercutParams {
     direct_key_held_pad_bits: AtomicU16,
     #[skip]
     direct_key_press_event: AtomicU32,
+    #[skip]
+    active_pitch_shift: AtomicI32,
+    #[skip]
+    suppressed_trigger_bits: AtomicU16,
     #[skip]
     pointer_held_pad_bits: AtomicU16,
     #[skip]
@@ -572,6 +601,83 @@ pub const fn pad_control_id(pad: usize, control: usize) -> u32 {
 }
 
 impl BufferUppercutParams {
+    pub(crate) fn suppress_restored_triggers(&self) {
+        let mut bits = 0;
+        for pad in 0..NUM_PADS {
+            if self.get_plain(pad_trigger_id(pad)).unwrap_or_default() >= 0.5 {
+                bits |= 1 << pad;
+            }
+        }
+        self.suppressed_trigger_bits.store(bits, Ordering::Release);
+    }
+
+    pub(crate) fn admit_trigger_input(&self, pad: usize) {
+        self.suppressed_trigger_bits
+            .fetch_and(!(1 << pad), Ordering::AcqRel);
+    }
+
+    pub(crate) fn trigger_is_suppressed(&self, pad: usize) -> bool {
+        self.suppressed_trigger_bits.load(Ordering::Acquire) & (1 << pad) != 0
+    }
+    /// Durable native-kit snapshot of the same sound and mapping configuration
+    /// saved by the host. Call only outside the audio callback.
+    pub fn snapshot_kit(&self) -> buffer_uppercut_kit::Kit {
+        let mut state = buffer_uppercut_dsp::PerformanceState::default();
+        for (pad, config) in state.pads.iter_mut().enumerate() {
+            config.effect_type = DspEffectType::from_index(
+                self.get_plain(pad_type_id(pad)).unwrap_or_default().round() as i32,
+            );
+            for (control, value) in config.macros.iter_mut().enumerate() {
+                *value = self
+                    .get_plain(pad_control_id(pad, control))
+                    .unwrap_or_default();
+            }
+        }
+        buffer_uppercut_kit::Kit {
+            name: self.kit_name(),
+            state,
+            key_map: self.key_map(),
+        }
+    }
+
+    pub(crate) fn key_map(&self) -> KeyMap {
+        self.key_map
+            .value
+            .read()
+            .map(|map| *map)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn set_key_map(&self, map: KeyMap) {
+        if let Ok(mut value) = self.key_map.value.write() {
+            *value = map;
+            self.key_map.generation.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    pub(crate) fn key_map_generation(&self) -> u32 {
+        self.key_map.generation.load(Ordering::Acquire)
+    }
+
+    /// Commit a UI edit only if no host recall replaced its source map.
+    pub(crate) fn update_key_map(
+        &self,
+        expected_generation: u32,
+        change: impl FnOnce(&mut KeyMap) -> Result<(), buffer_uppercut_kit::KeyMapError>,
+    ) -> Result<bool, buffer_uppercut_kit::KeyMapError> {
+        let Ok(mut value) = self.key_map.value.write() else {
+            return Ok(false);
+        };
+        if self.key_map.generation.load(Ordering::Acquire) != expected_generation {
+            return Ok(false);
+        }
+        let mut map = *value;
+        change(&mut map)?;
+        *value = map;
+        self.key_map.generation.fetch_add(1, Ordering::Release);
+        Ok(true)
+    }
+
     pub(crate) fn kit_name(&self) -> String {
         self.kit_name
             .read()
@@ -682,6 +788,7 @@ impl BufferUppercutParams {
         self.direct_key_held_pad_bits.store(0, Ordering::Release);
     }
 
+    #[cfg(test)]
     pub(crate) fn direct_key_held_pad_bits(&self) -> u16 {
         self.direct_key_held_pad_bits.load(Ordering::Acquire)
     }
@@ -702,6 +809,17 @@ impl BufferUppercutParams {
         )
     }
 
+    pub(crate) fn set_active_pitch_shift(&self, semitones: f64) {
+        self.active_pitch_shift.store(
+            semitones.round().clamp(-24.0, 24.0) as i32,
+            Ordering::Release,
+        );
+    }
+
+    pub(crate) fn active_pitch_shift(&self) -> i32 {
+        self.active_pitch_shift.load(Ordering::Acquire)
+    }
+
     pub(crate) fn set_pointer_held(&self, pad: usize, held: bool) {
         debug_assert!(pad < NUM_PADS);
         let bit = 1_u16 << pad;
@@ -717,6 +835,7 @@ impl BufferUppercutParams {
         self.pointer_held_pad_bits.store(0, Ordering::Release);
     }
 
+    #[cfg(test)]
     pub(crate) fn pointer_held_pad_bits(&self) -> u16 {
         self.pointer_held_pad_bits.load(Ordering::Acquire)
     }
@@ -760,15 +879,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonical_schema_has_145_stable_parameters() {
+    fn mapping_persistence_validates_whole_map_before_publication() {
+        let field = PersistedKeyMap::default();
+        let mut map = KeyMap::default();
+        map.swap(0, 15).unwrap();
+        field.persist_read(&mut StateCursor::new(&map.ids()));
+        assert_eq!(*field.value.read().unwrap(), map);
+        let generation = field.generation.load(Ordering::Acquire);
+        let mut invalid = map.ids();
+        invalid[0] = invalid[1];
+        field.persist_read(&mut StateCursor::new(&invalid));
+        field.persist_read(&mut StateCursor::new(&[1, 2]));
+        assert_eq!(*field.value.read().unwrap(), map);
+        assert_eq!(field.generation.load(Ordering::Acquire), generation);
+        let mut bytes = Vec::new();
+        field.persist_write(&mut bytes);
+        assert_eq!(bytes, map.ids());
+    }
+
+    #[test]
+    fn native_snapshot_omits_live_state_and_preserves_host_configuration() {
+        let params = BufferUppercutParams::default();
+        params.set_plain(pad_trigger_id(0), 1.0);
+        params.set_plain(pad_control_id(2, 3), 0.731);
+        params.set_active_pitch_shift(12.0);
+        let mut map = KeyMap::default();
+        map.swap(0, 15).unwrap();
+        params.set_key_map(map);
+        let kit = params.snapshot_kit();
+        assert_eq!(kit.key_map, map);
+        assert_eq!(kit.state.pads[2].macros[3], 0.731);
+        assert_eq!(kit.state.held, [false; NUM_PADS]);
+        assert_eq!(kit.state.active_pitch_shift, 0.0);
+    }
+
+    #[test]
+    fn canonical_schema_has_144_stable_parameters() {
         let params = BufferUppercutParams::default();
         let infos = params.param_infos();
-        assert_eq!(params.count(), 145);
-        assert_eq!(infos[0].id, 0);
-        assert_eq!(infos[0].name, "Performance Pitch");
-        assert_eq!(infos[1].name, "Pad 1 Trigger");
-        assert_eq!(infos[144].id, 144);
-        assert_eq!(infos[144].name, "Pad 16 Control 7");
+        assert_eq!(params.count(), 144);
+        assert_eq!(infos[0].id, 1);
+        assert_eq!(infos[0].name, "Pad 1 Trigger");
+        assert_eq!(infos[143].id, 144);
+        assert_eq!(infos[143].name, "Pad 16 Control 7");
     }
 
     #[test]
@@ -781,7 +934,7 @@ mod tests {
         assert_eq!(params.midi_pad_press_event(), (1, Some(5)));
         params.record_midi_pad_press(15);
         assert_eq!(params.midi_pad_press_event(), (2, Some(15)));
-        assert_eq!(params.count(), 145);
+        assert_eq!(params.count(), 144);
     }
 
     #[test]
@@ -798,7 +951,7 @@ mod tests {
         assert_eq!(params.direct_key_press_event(), first);
         assert!(params.apply_direct_key(3, false, false));
         assert_eq!(params.direct_key_held_pad_bits(), 0);
-        assert_eq!(params.count(), 145);
+        assert_eq!(params.count(), 144);
     }
 
     #[test]
@@ -830,19 +983,23 @@ mod tests {
         params.set_visualization_selected_pad(12);
         assert_eq!(params.admission_pad_bits(), (0x003f, 0x0040));
         assert_eq!(params.visualization_selected_pad(), 12);
-        assert_eq!(params.count(), 145);
+        assert_eq!(params.count(), 144);
     }
 
     #[test]
     fn kit_name_is_persisted_without_becoming_a_parameter() {
         let params = BufferUppercutParams::default();
         params.set_kit_name("Tape Lab");
+        let mut map = KeyMap::default();
+        map.swap(0, 12).unwrap();
+        params.set_key_map(map);
         let persist = params.serialize_persist();
 
         let restored = BufferUppercutParams::default();
         restored.load_persist(&persist);
         assert_eq!(restored.kit_name(), "Tape Lab");
-        assert_eq!(restored.count(), 145);
+        assert_eq!(restored.key_map(), map);
+        assert_eq!(restored.count(), 144);
     }
 
     #[test]
@@ -870,7 +1027,7 @@ mod tests {
         assert_eq!(snapshot.bins, bins);
         assert_eq!(snapshot.meta, meta);
         assert!(!params.waveform_snapshot(&mut snapshot));
-        assert_eq!(params.count(), 145);
+        assert_eq!(params.count(), 144);
     }
 
     #[test]
@@ -883,7 +1040,7 @@ mod tests {
                 assert_eq!(params.get_plain(id), Some(effect as f64));
             }
         }
-        assert_eq!(params.count(), 145);
+        assert_eq!(params.count(), 144);
     }
 
     #[test]

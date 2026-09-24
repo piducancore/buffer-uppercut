@@ -3,13 +3,16 @@
 
 use std::fmt;
 
+mod keys;
+pub use keys::{KeyId, KeyMap, KeyMapError};
+
 use buffer_uppercut_dsp::{
     EffectType, FilterMode, NUM_MACROS, NUM_PADS, PadConfig, PerformanceState, PitchRole,
     clamp_macro, classic_state, default_pad_config, filter_config, grid_normalized,
     lookback_normalized, normalize_linear, pitch_config,
 };
 
-pub const KIT_VERSION: u32 = 1;
+pub const KIT_VERSION: u32 = 3;
 pub const FACTORY_KIT_COUNT: usize = 5;
 pub const MAX_KIT_NAME_BYTES: usize = 63;
 pub const MAX_KIT_FILE_BYTES: usize = 4096;
@@ -20,6 +23,7 @@ const MAGIC: &[u8; 8] = b"BUPRESET";
 pub struct Kit {
     pub name: String,
     pub state: PerformanceState,
+    pub key_map: KeyMap,
 }
 
 impl Default for Kit {
@@ -37,9 +41,9 @@ pub enum DecodeError {
     UnsupportedLayout,
     InvalidName,
     InvalidUtf8,
-    InvalidPitch,
     InvalidEffect,
     InvalidControl,
+    InvalidKeyMap,
     TrailingData,
 }
 
@@ -53,9 +57,9 @@ impl fmt::Display for DecodeError {
             Self::UnsupportedLayout => "The preset layout is not supported.",
             Self::InvalidName => "The preset name is invalid.",
             Self::InvalidUtf8 => "The preset name is not valid UTF-8.",
-            Self::InvalidPitch => "The performance pitch is invalid.",
             Self::InvalidEffect => "A pad effect type is invalid.",
             Self::InvalidControl => "A pad control value is invalid.",
+            Self::InvalidKeyMap => "The physical key mapping is invalid.",
             Self::TrailingData => "The preset contains unexpected trailing data.",
         })
     }
@@ -74,17 +78,13 @@ pub fn encode(kit: &Kit) -> Vec<u8> {
     let name = truncated_name_bytes(&kit.name);
     put_u32(&mut bytes, name.len() as u32);
     bytes.extend_from_slice(name);
-    put_f64(
-        &mut bytes,
-        finite_or_zero(kit.state.performance_pitch).clamp(-24.0, 24.0),
-    );
-
     for pad in &kit.state.pads {
         put_u32(&mut bytes, pad.effect_type as u32);
         for control in pad.macros {
             put_f64(&mut bytes, clamp_macro(control));
         }
     }
+    bytes.extend_from_slice(&kit.key_map.ids());
     bytes
 }
 
@@ -119,15 +119,7 @@ pub fn decode(bytes: &[u8]) -> Result<Kit, DecodeError> {
         .to_owned();
     cursor += name_length;
 
-    let performance_pitch = get_f64(bytes, &mut cursor).ok_or(DecodeError::InvalidPitch)?;
-    if !performance_pitch.is_finite() || !(-24.0..=24.0).contains(&performance_pitch) {
-        return Err(DecodeError::InvalidPitch);
-    }
-
-    let mut state = PerformanceState {
-        performance_pitch,
-        ..PerformanceState::default()
-    };
+    let mut state = PerformanceState::default();
     for pad in &mut state.pads {
         let effect = get_u32(bytes, &mut cursor).ok_or(DecodeError::InvalidEffect)?;
         if effect > EffectType::Vinyl as u32 {
@@ -142,6 +134,13 @@ pub fn decode(bytes: &[u8]) -> Result<Kit, DecodeError> {
             *control = value;
         }
     }
+    let ids: [u8; NUM_PADS] = bytes
+        .get(cursor..cursor + NUM_PADS)
+        .ok_or(DecodeError::InvalidKeyMap)?
+        .try_into()
+        .map_err(|_| DecodeError::InvalidKeyMap)?;
+    let key_map = KeyMap::from_ids(ids).map_err(|_| DecodeError::InvalidKeyMap)?;
+    cursor += NUM_PADS;
     if cursor != bytes.len() {
         return Err(DecodeError::TrailingData);
     }
@@ -153,6 +152,7 @@ pub fn decode(bytes: &[u8]) -> Result<Kit, DecodeError> {
             name
         },
         state,
+        key_map,
     })
 }
 
@@ -186,6 +186,7 @@ pub fn classic_kit() -> Kit {
     Kit {
         name: "Classic".to_owned(),
         state: classic_state(),
+        key_map: KeyMap::default(),
     }
 }
 
@@ -328,6 +329,7 @@ fn kit_with_types(name: &str, effects: [EffectType; NUM_PADS]) -> Kit {
     Kit {
         name: name.to_owned(),
         state,
+        key_map: KeyMap::default(),
     }
 }
 
@@ -336,10 +338,6 @@ fn beat_repeat_config(cell_grid_index: i32, lookback_index: i32) -> PadConfig {
     config.macros[0] = grid_normalized(cell_grid_index);
     config.macros[1] = lookback_normalized(lookback_index);
     config
-}
-
-fn finite_or_zero(value: f64) -> f64 {
-    if value.is_finite() { value } else { 0.0 }
 }
 
 fn truncated_name_bytes(name: &str) -> &[u8] {
@@ -387,8 +385,8 @@ mod tests {
     }
 
     #[test]
-    fn version_one_preserves_sixteen_independent_same_type_slots() {
-        assert_eq!(KIT_VERSION, 1);
+    fn version_three_preserves_sixteen_independent_same_type_slots() {
+        assert_eq!(KIT_VERSION, 3);
 
         let mut kit = classic_kit();
         kit.state.pads[0] = default_pad_config(EffectType::Gate);
@@ -416,7 +414,7 @@ mod tests {
         let decoded = decode(&bytes).unwrap();
         assert_eq!(decoded.state.pads[0].effect_type, EffectType::Vinyl);
         assert_eq!(decoded.state.pads[3].macros, kit.state.pads[3].macros);
-        let first_effect = 24 + kit.name.len() + 8;
+        let first_effect = 24 + kit.name.len();
         bytes[first_effect..first_effect + 4].copy_from_slice(&11_u32.to_le_bytes());
         assert!(matches!(decode(&bytes), Err(DecodeError::InvalidEffect)));
     }
@@ -424,6 +422,20 @@ mod tests {
     #[test]
     fn codec_rejects_wrong_versions_layouts_and_trailing_bytes() {
         let encoded = encode(&classic_kit());
+
+        let mut version_one = encoded.clone();
+        version_one[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        assert!(matches!(
+            decode(&version_one),
+            Err(DecodeError::UnsupportedVersion)
+        ));
+
+        let mut version_two = encoded.clone();
+        version_two[8..12].copy_from_slice(&2_u32.to_le_bytes());
+        assert!(matches!(
+            decode(&version_two),
+            Err(DecodeError::UnsupportedVersion)
+        ));
 
         let mut wrong_version = encoded.clone();
         wrong_version[8..12].copy_from_slice(&(KIT_VERSION + 1).to_le_bytes());
@@ -445,14 +457,38 @@ mod tests {
     }
 
     #[test]
-    fn encoder_truncates_utf8_safely_and_sanitizes_non_finite_values() {
+    fn encoder_truncates_utf8_safely_and_sanitizes_non_finite_controls() {
         let mut kit = classic_kit();
         kit.name = format!("{}é", "x".repeat(62));
-        kit.state.performance_pitch = f64::NAN;
         kit.state.pads[0].macros[0] = f64::INFINITY;
         let decoded = decode(&encode(&kit)).expect("decode sanitized kit");
         assert_eq!(decoded.name, "x".repeat(62));
-        assert_eq!(decoded.state.performance_pitch, 0.0);
         assert_eq!(decoded.state.pads[0].macros[0], 0.0);
+    }
+
+    #[test]
+    fn custom_mapping_round_trips_without_performance_state() {
+        let mut kit = classic_kit();
+        kit.key_map.swap(0, 15).unwrap();
+        kit.key_map.assign(2, KeyId::UNASSIGNED).unwrap();
+        kit.key_map.assign(4, KeyId::from_id(47).unwrap()).unwrap();
+        kit.state.held[0] = true;
+        kit.state.active_pitch_shift = 12.0;
+        let decoded = decode(&encode(&kit)).unwrap();
+        assert_eq!(decoded.key_map, kit.key_map);
+        assert_eq!(decoded.state.held, [false; NUM_PADS]);
+        assert_eq!(decoded.state.active_pitch_shift, 0.0);
+    }
+
+    #[test]
+    fn malformed_mapping_payload_is_rejected() {
+        let mut bytes = encode(&classic_kit());
+        let start = bytes.len() - NUM_PADS;
+        bytes[start] = bytes[start + 1];
+        assert!(matches!(decode(&bytes), Err(DecodeError::InvalidKeyMap)));
+        bytes[start] = 255;
+        assert!(matches!(decode(&bytes), Err(DecodeError::InvalidKeyMap)));
+        bytes.truncate(start + NUM_PADS - 1);
+        assert!(matches!(decode(&bytes), Err(DecodeError::InvalidKeyMap)));
     }
 }

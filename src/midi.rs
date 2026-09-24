@@ -1,4 +1,3 @@
-use keyboard_types::Code as PhysicalKeyCode;
 use truce::prelude::{EventBody, EventList};
 
 #[must_use]
@@ -7,34 +6,6 @@ pub const fn pad_for_note(note: u8) -> Option<usize> {
         60..=75 => Some((note - 60) as usize),
         57..=59 => Some((note - 48) as usize),
         81..=83 => Some((note - 72) as usize),
-        _ => None,
-    }
-}
-
-#[must_use]
-pub const fn pad_for_physical_key(code: PhysicalKeyCode) -> Option<usize> {
-    use PhysicalKeyCode::{
-        Digit1, Digit2, Digit3, Digit4, KeyA, KeyC, KeyD, KeyE, KeyF, KeyQ, KeyR, KeyS, KeyV, KeyW,
-        KeyX, KeyZ,
-    };
-
-    match code {
-        Digit1 => Some(0),
-        Digit2 => Some(1),
-        Digit3 => Some(2),
-        Digit4 => Some(3),
-        KeyQ => Some(4),
-        KeyW => Some(5),
-        KeyE => Some(6),
-        KeyR => Some(7),
-        KeyA => Some(8),
-        KeyS => Some(9),
-        KeyD => Some(10),
-        KeyF => Some(11),
-        KeyZ => Some(12),
-        KeyX => Some(13),
-        KeyC => Some(14),
-        KeyV => Some(15),
         _ => None,
     }
 }
@@ -68,8 +39,7 @@ pub fn apply_events(held_pads_by_channel: &mut [u16; 16], events: &EventList) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_events, pad_for_note, pad_for_physical_key};
-    use keyboard_types::Code as PhysicalKeyCode;
+    use super::{apply_events, pad_for_note};
     use truce::prelude::{Event, EventBody, EventList};
 
     #[test]
@@ -86,32 +56,6 @@ mod tests {
         assert_eq!(pad_for_note(81), Some(9));
         assert_eq!(pad_for_note(83), Some(11));
         assert_eq!(pad_for_note(56), None);
-    }
-
-    #[test]
-    fn maps_physical_keyboard_grid_to_all_pads() {
-        let codes = [
-            PhysicalKeyCode::Digit1,
-            PhysicalKeyCode::Digit2,
-            PhysicalKeyCode::Digit3,
-            PhysicalKeyCode::Digit4,
-            PhysicalKeyCode::KeyQ,
-            PhysicalKeyCode::KeyW,
-            PhysicalKeyCode::KeyE,
-            PhysicalKeyCode::KeyR,
-            PhysicalKeyCode::KeyA,
-            PhysicalKeyCode::KeyS,
-            PhysicalKeyCode::KeyD,
-            PhysicalKeyCode::KeyF,
-            PhysicalKeyCode::KeyZ,
-            PhysicalKeyCode::KeyX,
-            PhysicalKeyCode::KeyC,
-            PhysicalKeyCode::KeyV,
-        ];
-        for (pad, code) in codes.into_iter().enumerate() {
-            assert_eq!(pad_for_physical_key(code), Some(pad));
-        }
-        assert_eq!(pad_for_physical_key(PhysicalKeyCode::Digit5), None);
     }
 
     #[test]

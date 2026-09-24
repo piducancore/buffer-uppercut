@@ -10,7 +10,7 @@ It provides:
 
 - 16 momentary performance pads driven by the UI, automation, or MIDI notes
   60–75, plus an opt-in physical computer-key layout in plugins and a
-  default-on layout in the standalone development host;
+  default-on layout in the standalone development host, with configurable keys;
 - beat repeat, reverse, tape stop, gate, a held grain Pitch with Down/Up action
   roles, a multimode Filter, LoFi, and Vinyl record-wear effects;
 - deterministic serial stacking in ascending slot order, including repeated
@@ -19,8 +19,9 @@ It provides:
   labels and values;
 - independent eight-second stereo `f32` histories for configured buffer slots,
   `f64` signal processing, and a stereo history/captured-slice waveform;
-- five factory kits, host-native preset recall, and a versioned `.bupreset`
-  codec;
+- five factory kits, 144 automatable parameters, host-native preset recall, and
+  a versioned `.bupreset`
+  version 3 codec carrying the same durable sound configuration and key map;
 - host tempo, automation, state recall, MIDI illumination, and MIDI
   auto-selection;
 - CLAP and VST3 plugin targets, plus a development-only standalone host;
@@ -38,6 +39,13 @@ Flutter, Wear, Drive, Dust, Noise, and Wet. See the
 In the Classic kit, hold **D** to engage grain Pitch, then tap **S** or **F** to
 move down or up by the configured Step. Each new tap accumulates while D remains
 held; releasing D returns Active Shift to zero.
+
+Use the editor's key mapping controls to learn or clear a pad's physical key,
+explicitly swap an occupied assignment, or reset the layout. Factory recall also
+restores its key map. Key and pointer presses send pad Trigger automation gestures;
+the DAW controls whether these are recorded. Host recording/playback acceptance
+is still pending, and presses shorter than one processing block can be lost.
+See [performance-input acceptance](docs/TESTING.md#performance-input-acceptance).
 
 ## Quick start
 

@@ -76,7 +76,7 @@ use clap_sys::ext::remote_controls::{
 use clap_sys::ext::render::{
     CLAP_EXT_RENDER, CLAP_RENDER_OFFLINE, clap_plugin_render, clap_plugin_render_mode,
 };
-use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
+use clap_sys::ext::state::{CLAP_EXT_STATE, clap_host_state, clap_plugin_state};
 use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_host_tail, clap_plugin_tail};
 use clap_sys::factory::preset_discovery::{
     CLAP_PRESET_DISCOVERY_LOCATION_FILE, clap_preset_discovery_location_kind,
@@ -279,6 +279,7 @@ struct ClapPluginData<P: PluginExport> {
     render_mode: AtomicU8,
     /// Flag: GUI changed params, need rescan on main thread.
     needs_rescan: Arc<AtomicBool>,
+    state_dirty: Arc<AtomicBool>,
     /// Shared transport slot: audio thread writes each block, editor reads.
     transport_slot: Arc<TransportSlot>,
     /// Host-reported GUI scale (via `clap_plugin_gui::set_scale`).
@@ -790,6 +791,17 @@ unsafe extern "C" fn clap_plugin_on_main_thread<P: PluginExport>(plugin: *const 
             && let Some(rescan) = (*data.host_params).rescan
         {
             rescan(data.host, CLAP_PARAM_RESCAN_VALUES);
+        }
+        if data.state_dirty.swap(false, Ordering::AcqRel)
+            && !data.host.is_null()
+            && let Some(get_ext) = (*data.host).get_extension
+        {
+            let state = get_ext(data.host, CLAP_EXT_STATE.as_ptr()).cast::<clap_host_state>();
+            if !state.is_null()
+                && let Some(mark_dirty) = (*state).mark_dirty
+            {
+                mark_dirty(data.host);
+            }
         }
 
         // Latency changed on the audio thread: tell the host here, off
@@ -3600,7 +3612,20 @@ unsafe fn gui_set_parent_inner<P: PluginExport>(
             },
             params_for_ctx,
         )
-        .with_tasks(task_spawner_for_ctx);
+        .with_tasks(task_spawner_for_ctx)
+        .with_state_dirty_callback({
+            let dirty = data.state_dirty.clone();
+            let host = SendPtr::new(data.host);
+            move || {
+                let host = host.as_ptr();
+                if !dirty.swap(true, Ordering::AcqRel)
+                    && !host.is_null()
+                    && let Some(request) = (*host).request_callback
+                {
+                    request(host);
+                }
+            }
+        });
 
         #[cfg(target_os = "macos")]
         let handle = RawWindowHandle::AppKit(parent_ptr);
@@ -4172,6 +4197,7 @@ pub unsafe fn create_plugin_instance<P: PluginExport>(
             active: AtomicBool::new(false),
             render_mode: AtomicU8::new(ProcessMode::Realtime.as_u8()),
             needs_rescan: Arc::new(AtomicBool::new(false)),
+            state_dirty: Arc::new(AtomicBool::new(false)),
             transport_slot: TransportSlot::new(),
             host_scale: AtomicU64::new(1.0f64.to_bits()),
             pending_resize: AtomicU64::new(0),
