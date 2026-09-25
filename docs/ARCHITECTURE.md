@@ -215,7 +215,8 @@ embedded editor.
 The native editor uses a cream chassis, charcoal instrument panels, and acid
 yellow accents. Factory navigation and tempo sit above the stereo monitor;
 an aligned four-by-four bank of light keycaps sits beside the effect selector
-and all seven macros. A static signal-route strip describes audio flow.
+and all seven macros. Key assignment controls and their status sit below the
+knobs in the selected-pad panel. A static signal-route strip describes audio flow.
 
 Yellow outlines and a left marker identify the selected pad; yellow fill and
 ACTIVE/HELD text identify performance holds, and warm orange identifies suspended

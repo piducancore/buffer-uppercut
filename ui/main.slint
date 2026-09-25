@@ -665,24 +665,6 @@ export component BufferUppercutUi inherits Window {
                             released(index) => { root.pad-released(index); }
                         }
                     }
-                    HorizontalLayout {
-                        height: 25px; spacing: 6px;
-                        InstrumentButton {
-                            label: root.key-learning ? "CANCEL" : "LEARN PAD " + (root.selected-pad + 1);
-                            clicked => { if root.key-learning { root.cancel-learn(); } else { root.learn-key(); } }
-                        }
-                        if root.key-conflict: InstrumentButton {
-                            label: "SWAP";
-                            clicked => { root.swap-keys(); }
-                        }
-                        InstrumentButton { label: "CLEAR KEY"; clicked => { root.clear-key(); } }
-                        InstrumentButton { label: "RESET LAYOUT"; clicked => { root.reset-keys(); } }
-                    }
-                    Text {
-                        height: 14px; min-width: 0px; overflow: elide;
-                        text: root.key-status; color: root.key-learning ? #e5fa36 : #b4b8ac; font-size: 9px;
-                        vertical-alignment: center;
-                    }
                 }
             }
             Rectangle {
@@ -719,6 +701,24 @@ export component BufferUppercutUi inherits Window {
                             value-changed(value) => { root.macro-value-changed(index, value); }
                             edit-ended => { root.macro-edit-ended(index); }
                         }
+                    }
+                    HorizontalLayout {
+                        height: 25px; spacing: 6px;
+                        InstrumentButton {
+                            label: root.key-learning ? "CANCEL" : "LEARN KEY";
+                            clicked => { if root.key-learning { root.cancel-learn(); } else { root.learn-key(); } }
+                        }
+                        if root.key-conflict: InstrumentButton {
+                            label: "SWAP";
+                            clicked => { root.swap-keys(); }
+                        }
+                        InstrumentButton { label: "CLEAR"; clicked => { root.clear-key(); } }
+                        InstrumentButton { label: "RESET LAYOUT"; clicked => { root.reset-keys(); } }
+                    }
+                    Text {
+                        height: 14px; min-width: 0px; overflow: elide;
+                        text: root.key-status; color: root.key-learning ? #e5fa36 : #b4b8ac; font-size: 9px;
+                        vertical-alignment: center;
                     }
                 }
             }

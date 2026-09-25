@@ -131,6 +131,12 @@ Earlier editor/Pitch/preview evidence below does not verify this increment.
 
 ### Remaining host checklist
 
+User feedback on Preview 4 confirms pad and knob automation recording in
+Ableton Arrangement View with Automation Arm enabled. This does not yet cover
+the full replay, save/reopen, or cleanup checklist below. The subsequent layout
+revision places key-mapping controls below the selected pad's knobs; all five
+size/captured/Vinyl renders were visually reviewed for that placement.
+
 - Ableton Live VST3: enable Arrangement Automation Arm, record key and pointer
   gestures, inspect Trigger 1/0 edges, replay without live input, then save/reopen
   and replay. Test Session automation separately and record its settings.
