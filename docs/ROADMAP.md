@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-10-16.
+Last updated: 2026-10-22.
 
 This file tracks current product status. Architectural rationale belongs in
 `adr/`; durable behavior belongs in `CONTRACTS.md`.
@@ -80,6 +80,10 @@ This file tracks current product status. Architectural rationale belongs in
   DAW evidence; current LMMS versions do not natively host CLAP or VST3.
 
 ## Next: stable release sign-off
+
+- Preview 5 packages the expanded Beat Repeat Cell scale and mapping controls
+  beneath the knobs. Exact-artifact validation and accepted preview limitations
+  are described in [its release notes](releases/0.1.0-preview.5.md).
 
 - Preview 4 introduces configurable direct-key layouts and host-recordable
   pointer/direct-key pad gestures for macOS, Windows and Linux unsigned

@@ -42,3 +42,46 @@ Preview 2 adds an x86-64 Linux package built on Ubuntu 22.04. Linux currently
 has automated CLAP/pluginval coverage only and must be described as unverified
 in a real Linux DAW. Do not claim LMMS compatibility: current LMMS releases do
 not natively host CLAP or VST3.
+
+## Commit, publish, and refresh the website
+
+After the release inputs above are reviewed, update all three product crate
+versions and their lockfile entries. The DSP/kit entries in the notice baseline
+also carry those versions; compare a fresh license inventory before approval.
+Stage the specific release files, not generated analysis folders or build output.
+
+Example for preview 5 (substitute the next version for future releases):
+
+```sh
+git diff --cached --check
+git commit -m "Release preview 5 with expanded Beat Repeat cells"
+git push origin main
+git tag -a v0.1.0-preview.5 -m "Buffer Uppercut 0.1.0-preview.5"
+git push origin v0.1.0-preview.5
+gh run list --workflow release.yml --limit 5
+gh run view RUN_ID
+```
+
+The tag starts **Unsigned preview candidate**. Wait for every job to succeed.
+If the workflow needs a deliberate retry, use
+`gh workflow run release.yml -f tag=v0.1.0-preview.5`; do not move a published tag.
+Inspect the draft notes and download its three platform ZIPs plus `SHA256SUMS`
+into a fresh temporary directory. Verify checksums, CLAP/VST3 bundle contents,
+installation instructions, licenses and release-note versions before publishing.
+Do not bypass failed checks or overwrite published assets.
+
+```sh
+gh release view v0.1.0-preview.5 --json isDraft,assets,body
+gh release download v0.1.0-preview.5 --dir REVIEW_DIRECTORY
+# From REVIEW_DIRECTORY on macOS:
+shasum -a 256 -c SHA256SUMS
+gh release edit v0.1.0-preview.5 --draft=false --prerelease
+gh workflow run pages.yml --ref main
+gh run list --workflow pages.yml --limit 5
+```
+
+Wait for the Website deployment to succeed, then verify that
+https://piducan.dev/buffer-uppercut/ shows the new version and all three download
+links. The website reads published GitHub Releases at build time; no manual
+download-URL edit is required. Publishing binaries and refreshing Pages are
+separate steps. See [website behavior](../../site/README.md).
