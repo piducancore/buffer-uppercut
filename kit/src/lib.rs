@@ -9,7 +9,7 @@ pub use keys::{KeyId, KeyMap, KeyMapError};
 use buffer_uppercut_dsp::{
     EffectType, FilterMode, NUM_MACROS, NUM_PADS, PadConfig, PerformanceState, PitchRole,
     clamp_macro, classic_state, default_pad_config, filter_config, grid_normalized,
-    lookback_normalized, normalize_linear, pitch_config,
+    lookback_normalized, normalize_linear, pitch_config, repeat_cell_normalized,
 };
 
 pub const KIT_VERSION: u32 = 3;
@@ -335,7 +335,8 @@ fn kit_with_types(name: &str, effects: [EffectType; NUM_PADS]) -> Kit {
 
 fn beat_repeat_config(cell_grid_index: i32, lookback_index: i32) -> PadConfig {
     let mut config = default_pad_config(EffectType::BeatRepeat);
-    config.macros[0] = grid_normalized(cell_grid_index);
+    const STRAIGHT_CELLS: [i32; 9] = [0, 1, 3, 5, 9, 11, 12, 13, 14];
+    config.macros[0] = repeat_cell_normalized(STRAIGHT_CELLS[cell_grid_index.clamp(0, 8) as usize]);
     config.macros[1] = lookback_normalized(lookback_index);
     config
 }

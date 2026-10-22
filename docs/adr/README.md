@@ -16,6 +16,9 @@ Do not use ADRs as task trackers or changelogs. Current work belongs in
 
 Current records:
 
+- [0015 — Expanded Beat Repeat Cell divisions](0015-expanded-repeat-cells.md)
+  defines the separate 15-choice Cell scale and deliberate state reinterpretation.
+
 - [0001 — TRUCE is the canonical implementation](0001-truce-canonical.md)
 - [0002 — Slint is the production editor](0002-slint-editor.md)
 - [0003 — Audio-to-UI data uses bounded atomic snapshots](0003-atomic-visualization.md)

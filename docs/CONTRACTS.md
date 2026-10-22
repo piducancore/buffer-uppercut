@@ -60,6 +60,19 @@ Fresh host parameter defaults match the Classic factory kit, including Pitch
 roles, Filter Mode values, and 100% Wet for the Pitch Trigger and all three
 filter pads.
 
+### Beat Repeat Cell divisions
+
+Cell has 15 choices in ascending duration: `1/64`, `1/32`, `1/24`, `1/16`,
+`1/12`, `1/8`, `1/6`, `3/16`, `1/5`, `1/4`, `1/3`, `1/2`, `1 BAR`,
+`2 BAR`, `4 BAR`. Fractions refer to a whole note (four quarter-note beats);
+the bar labels retain the existing fixed four-beat convention.
+The normalized value selects `round(clamp(value, 0, 1) * 14)`; exact choice
+positions are `index / 14`. Reverse, Tape Stop, and Gate retain their nine-choice
+straight grid. Factory kits retain their authored durations. Existing normalized
+Beat Repeat Cell state/automation is deliberately reinterpreted without migration;
+parameter IDs and the native kit binary layout remain unchanged.
+See [ADR 0015](adr/0015-expanded-repeat-cells.md).
+
 ### Held grain Pitch macros
 
 Pitch is one effect at value 5 with seven normalized controls:
@@ -344,7 +357,10 @@ lookback. V3 migrates those inputs to the unified Filter schema. V4 consolidates
 Pitch, contracts its roles, and captures the grain processor and numbering
 changes. All versions require finite output and use `1e-7`
 absolute-plus-relative `f64` tolerance. Each version has its own manifest and
-checksum list.
+checksum list. The v4 test reader translates its nine-choice Beat Repeat Cell
+inputs to the expanded scale while retaining the frozen audio references.
+New divisions have separate DSP duration tests; this test-only translation is
+not a runtime preset migration.
 
 The C++ provenance of v1 is evidence, not a promise that Buffer Uppercut loads
 old binaries, state, presets, or identifiers. Future intentional sound changes

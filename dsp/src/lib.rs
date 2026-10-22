@@ -287,6 +287,38 @@ pub fn denormalize_linear(normalized: f64, minimum: f64, maximum: f64) -> f64 {
 }
 
 #[must_use]
+pub fn repeat_cell_normalized(index: i32) -> f64 {
+    f64::from(index.clamp(0, 14)) / 14.0
+}
+
+fn repeat_cell_index(value: f64) -> usize {
+    (clamp_macro(value) * 14.0).round() as usize
+}
+
+const REPEAT_CELLS: [(&str, f64); 15] = [
+    ("1/64", 1.0 / 16.0),
+    ("1/32", 1.0 / 8.0),
+    ("1/24", 1.0 / 6.0),
+    ("1/16", 1.0 / 4.0),
+    ("1/12", 1.0 / 3.0),
+    ("1/8", 1.0 / 2.0),
+    ("1/6", 2.0 / 3.0),
+    ("3/16", 3.0 / 4.0),
+    ("1/5", 4.0 / 5.0),
+    ("1/4", 1.0),
+    ("1/3", 4.0 / 3.0),
+    ("1/2", 2.0),
+    ("1 BAR", 4.0),
+    ("2 BAR", 8.0),
+    ("4 BAR", 16.0),
+];
+
+#[must_use]
+pub fn repeat_cell_beats(value: f64) -> f64 {
+    REPEAT_CELLS[repeat_cell_index(value)].1
+}
+
+#[must_use]
 pub fn grid_normalized(index: i32) -> f64 {
     clamp_macro(f64::from(index.clamp(0, 8)) / 8.0)
 }
@@ -385,7 +417,7 @@ pub fn format_control_value(effect_type: EffectType, control: usize, normalized:
     match effect_type {
         EffectType::Off => String::new(),
         EffectType::BeatRepeat => match control {
-            0 => grid_label(normalized).to_owned(),
+            0 => REPEAT_CELLS[repeat_cell_index(normalized)].0.to_owned(),
             1 => lookback_label(normalized).to_owned(),
             2 | 6 => percent(normalized),
             3 => if normalized >= 0.5 { "INSERT" } else { "MIX" }.to_owned(),
@@ -476,7 +508,15 @@ pub fn default_pad_config(effect_type: EffectType) -> PadConfig {
     let grid_16 = grid_normalized(2);
     match effect_type {
         EffectType::BeatRepeat => {
-            config.macros = [grid_16, lookback_normalized(0), 1.0, 1.0, 0.5, 0.0, 0.0];
+            config.macros = [
+                repeat_cell_normalized(3),
+                lookback_normalized(0),
+                1.0,
+                1.0,
+                0.5,
+                0.0,
+                0.0,
+            ];
         }
         EffectType::Reverse => {
             config.macros = [grid_normalized(6), 1.0, 1.0, 0.5, 0.0, 0.0, 0.0];
@@ -584,12 +624,12 @@ pub fn classic_state() -> PerformanceState {
     for (pad, effect) in TYPES.into_iter().enumerate() {
         state.pads[pad] = default_pad_config(effect);
     }
-    for (pad, grid) in [2, 3, 4, 1].into_iter().enumerate() {
-        state.pads[pad].macros[0] = grid_normalized(grid);
+    for (pad, grid) in [3, 5, 9, 1].into_iter().enumerate() {
+        state.pads[pad].macros[0] = repeat_cell_normalized(grid);
     }
-    state.pads[4].macros[0] = grid_normalized(2);
+    state.pads[4].macros[0] = repeat_cell_normalized(3);
     state.pads[4].macros[1] = lookback_normalized(6);
-    state.pads[5].macros[0] = grid_normalized(2);
+    state.pads[5].macros[0] = repeat_cell_normalized(3);
     state.pads[5].macros[1] = lookback_normalized(7);
     state.pads[9] = pitch_config(PitchRole::Down, 1.0);
     state.pads[10] = pitch_config(PitchRole::Trigger, 1.0);
@@ -1343,7 +1383,11 @@ impl Engine {
     }
 
     fn start_buffer_effect(buffer: &mut BufferState, config: &PadConfig, samples_per_beat: f64) {
-        let slice_beats = grid_beats(config.macros[0]);
+        let slice_beats = if config.effect_type == EffectType::BeatRepeat {
+            repeat_cell_beats(config.macros[0])
+        } else {
+            grid_beats(config.macros[0])
+        };
         let jitter = Self::common_jitter(config);
         let jitter_scale = 1.0 + (buffer.rand_01() * 2.0 - 1.0) * jitter * 0.25;
         let maximum_slice = buffer.history_l.len().saturating_sub(2).max(8);
@@ -1612,6 +1656,39 @@ mod tests {
     }
 
     #[test]
+    fn expanded_repeat_cells_capture_the_requested_musical_duration() {
+        for (index, label, beats) in [
+            (2, "1/24", 1.0 / 6.0),
+            (4, "1/12", 1.0 / 3.0),
+            (6, "1/6", 2.0 / 3.0),
+            (7, "3/16", 0.75),
+            (8, "1/5", 0.8),
+            (10, "1/3", 4.0 / 3.0),
+        ] {
+            let mut config = default_pad_config(EffectType::BeatRepeat);
+            config.macros[0] = repeat_cell_normalized(index);
+            assert_eq!(
+                format_control_value(EffectType::BeatRepeat, 0, config.macros[0]),
+                label
+            );
+            for samples_per_beat in [12000.0, 24000.0, 48000.0] {
+                let mut engine = Engine::default();
+                engine.reset(48000.0);
+                let buffer = &mut engine.slots[0].buffer;
+                Engine::start_buffer_effect(buffer, &config, samples_per_beat);
+                assert_eq!(
+                    buffer.slice_samples,
+                    (beats * samples_per_beat).round() as i32
+                );
+                assert_eq!(buffer.lookback_samples, buffer.slice_samples);
+            }
+        }
+        assert_eq!(repeat_cell_beats(-1.0), 1.0 / 16.0);
+        assert_eq!(repeat_cell_beats(2.0), 16.0);
+        assert!(REPEAT_CELLS.windows(2).all(|pair| pair[0].1 < pair[1].1));
+    }
+
+    #[test]
     fn classic_state_has_all_effects_and_expected_repeat_presets() {
         let state = classic_state();
         assert_eq!(state.pads[0].effect_type, EffectType::BeatRepeat);
@@ -1725,7 +1802,7 @@ mod tests {
     #[test]
     fn semantic_control_values_match_the_product_ui_contract() {
         assert_eq!(
-            format_control_value(EffectType::BeatRepeat, 0, grid_normalized(2)),
+            format_control_value(EffectType::BeatRepeat, 0, repeat_cell_normalized(3)),
             "1/16"
         );
         assert_eq!(

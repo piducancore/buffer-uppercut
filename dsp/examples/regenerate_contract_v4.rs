@@ -220,6 +220,13 @@ fn render_fixture(fixture: &Fixture) -> String {
         };
         for pad in 0..NUM_PADS {
             state.held[pad] = block.held & (1 << pad) != 0;
+            // Keep v4 serialized inputs on their historical nine-choice scale.
+            if state.pads[pad].effect_type == EffectType::BeatRepeat {
+                let index = buffer_uppercut_dsp::grid_index(state.pads[pad].macros[0]);
+                state.pads[pad].macros[0] = buffer_uppercut_dsp::repeat_cell_normalized(
+                    [0, 1, 3, 5, 9, 11, 12, 13, 14][index],
+                );
+            }
         }
         let input_l: Vec<_> = block.input.iter().map(|sample| sample[0]).collect();
         let input_r: Vec<_> = block.input.iter().map(|sample| sample[1]).collect();

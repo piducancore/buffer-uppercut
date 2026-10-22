@@ -1,11 +1,15 @@
 # Roadmap
 
-Last updated: 2026-09-24.
+Last updated: 2026-10-16.
 
 This file tracks current product status. Architectural rationale belongs in
 `adr/`; durable behavior belongs in `CONTRACTS.md`.
 
 ## Current baseline
+
+- Beat Repeat Cell includes triplet, dotted, and quintuplet choices on its own
+  15-choice scale; see [Cell divisions](CONTRACTS.md#beat-repeat-cell-divisions).
+  Listening and host automation acceptance of the added divisions remain open.
 
 - Pitch is one effect with Down, Trigger, and Up roles. A held Trigger runs a
   tempo-preserving grain shifter; action taps accumulate their configured Step

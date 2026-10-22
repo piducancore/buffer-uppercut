@@ -227,7 +227,7 @@ pad_params!(
         "Pad 1 Control 7"
     ],
     1,
-    [0.25, 0.0, 1.0, 1.0, 0.5, 0.0, 0.0]
+    [0.21428571428571427, 0.0, 1.0, 1.0, 0.5, 0.0, 0.0]
 );
 pad_params!(
     Pad02Params,
@@ -244,7 +244,7 @@ pad_params!(
         "Pad 2 Control 7"
     ],
     1,
-    [0.375, 0.0, 1.0, 1.0, 0.5, 0.0, 0.0]
+    [0.35714285714285715, 0.0, 1.0, 1.0, 0.5, 0.0, 0.0]
 );
 pad_params!(
     Pad03Params,
@@ -261,7 +261,7 @@ pad_params!(
         "Pad 3 Control 7"
     ],
     1,
-    [0.5, 0.0, 1.0, 1.0, 0.5, 0.0, 0.0]
+    [0.6428571428571429, 0.0, 1.0, 1.0, 0.5, 0.0, 0.0]
 );
 pad_params!(
     Pad04Params,
@@ -278,7 +278,7 @@ pad_params!(
         "Pad 4 Control 7"
     ],
     1,
-    [0.125, 0.0, 1.0, 1.0, 0.5, 0.0, 0.0]
+    [0.07142857142857142, 0.0, 1.0, 1.0, 0.5, 0.0, 0.0]
 );
 pad_params!(
     Pad05Params,
@@ -295,7 +295,15 @@ pad_params!(
         "Pad 5 Control 7"
     ],
     1,
-    [0.25, 0.6666666666666666, 1.0, 1.0, 0.5, 0.0, 0.0]
+    [
+        0.21428571428571427,
+        0.6666666666666666,
+        1.0,
+        1.0,
+        0.5,
+        0.0,
+        0.0
+    ]
 );
 pad_params!(
     Pad06Params,
@@ -312,7 +320,15 @@ pad_params!(
         "Pad 6 Control 7"
     ],
     1,
-    [0.25, 0.7777777777777778, 1.0, 1.0, 0.5, 0.0, 0.0]
+    [
+        0.21428571428571427,
+        0.7777777777777778,
+        1.0,
+        1.0,
+        0.5,
+        0.0,
+        0.0
+    ]
 );
 pad_params!(
     Pad07Params,
@@ -1048,7 +1064,14 @@ mod tests {
         let params = BufferUppercutParams::default();
         assert_eq!(params.get_plain(pad_type_id(0)), Some(1.0));
         assert_eq!(params.get_plain(pad_type_id(15)), Some(7.0));
-        assert_eq!(params.get_plain(pad_control_id(0, 0)), Some(0.25));
+        for (pad, beats) in [0.25, 0.5, 1.0, 0.125, 0.25, 0.25].into_iter().enumerate() {
+            assert_eq!(
+                buffer_uppercut_dsp::repeat_cell_beats(
+                    params.get_plain(pad_control_id(pad, 0)).unwrap()
+                ),
+                beats
+            );
+        }
         assert_eq!(
             params.get_plain(pad_control_id(4, 1)),
             Some(0.6666666666666666)

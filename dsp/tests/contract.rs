@@ -61,6 +61,15 @@ fn parse_fixture(text: &str) -> Fixture {
                     effect_type: EffectType::from_index(effect),
                     macros,
                 };
+                // The frozen v4 corpus encodes nine straight divisions. Translate
+                // only its test inputs to the expanded Cell scale; audio references
+                // remain unchanged. This is not a product state migration.
+                if fixture.pads[pad].effect_type == EffectType::BeatRepeat {
+                    let index = buffer_uppercut_dsp::grid_index(macros[0]);
+                    fixture.pads[pad].macros[0] = buffer_uppercut_dsp::repeat_cell_normalized(
+                        [0, 1, 3, 5, 9, 11, 12, 13, 14][index],
+                    );
+                }
             }
             "block" => {
                 if let Some(block) = current_block.take() {

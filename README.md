@@ -47,6 +47,10 @@ the DAW controls whether these are recorded. Host recording/playback acceptance
 is still pending, and presses shorter than one processing block can be lost.
 See [performance-input acceptance](docs/TESTING.md#performance-input-acceptance).
 
+Beat Repeat's Cell knob includes triplet divisions `1/3`, `1/6`, `1/12`, and
+`1/24`, plus dotted `3/16` and quintuplet `1/5`, alongside the straight divisions.
+See the [Cell scale](docs/CONTRACTS.md#beat-repeat-cell-divisions).
+
 ## Quick start
 
 Prerequisites:

@@ -131,6 +131,12 @@ Earlier editor/Pitch/preview evidence below does not verify this increment.
 
 ### Remaining host checklist
 
+- Expanded Beat Repeat Cell: audition 1/3, 1/6, 1/12, 1/24, 3/16, and 1/5
+  against a metronome; record/replay Cell automation and save/reopen a new preset.
+  Confirm CELL lookback follows the chosen duration and other effects retain
+  their straight grid. DSP tests cover capture lengths at multiple tempos;
+  installed-host listening acceptance for these additions remains pending.
+
 User feedback on Preview 4 confirms pad and knob automation recording in
 Ableton Arrangement View with Automation Arm enabled. This does not yet cover
 the full replay, save/reopen, or cleanup checklist below. The subsequent layout
