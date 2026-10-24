@@ -4,6 +4,8 @@
 - Date: 2026-08-15
 - Implementation: current canonical architecture
 
+Routing order and buffer history positions are superseded by [ADR 0017](0017-press-order-chain.md).
+
 ## Context
 
 Buffer Uppercut previously selected at most one processor from each effect
@@ -100,6 +102,8 @@ effect-type changes deterministic without allocating or fabricating unavailable
 lookback.
 
 ### Visualization selection
+
+Superseded for the editor by [ADR 0016](0016-live-performance-visualization.md).
 
 When multiple buffer slots could supply the captured-slice visualization, use
 the editor-selected slot first if it is a held buffer slot. This includes a

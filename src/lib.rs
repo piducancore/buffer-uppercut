@@ -6,7 +6,7 @@ mod params;
 
 use buffer_uppercut_dsp::{
     EffectType, Engine, NUM_MACROS, NUM_PADS, PadConfig, PerformanceState, PitchRole,
-    VisualizationBin, apply_pitch_action,
+    StageVisualization, VisualizationBin, apply_pitch_action,
 };
 use truce::prelude64::*;
 
@@ -31,6 +31,8 @@ pub struct BufferUppercut {
     sample_rate: f64,
     visualization_countdown: usize,
     visualization_scratch: [VisualizationBin; NUM_VISUALIZATION_BINS],
+    input_visualization: [VisualizationBin; NUM_VISUALIZATION_BINS],
+    stage_visualization: [StageVisualization; NUM_PADS],
     kit_reset_sequence: u32,
 }
 
@@ -49,6 +51,8 @@ impl Default for BufferUppercut {
             sample_rate: 44_100.0,
             visualization_countdown: 0,
             visualization_scratch: [VisualizationBin::default(); NUM_VISUALIZATION_BINS],
+            input_visualization: [VisualizationBin::default(); NUM_VISUALIZATION_BINS],
+            stage_visualization: [StageVisualization::default(); NUM_PADS],
             kit_reset_sequence: 0,
         }
     }
@@ -114,10 +118,18 @@ impl PluginLogic for BufferUppercut {
         state
             .engine
             .set_visualization_selected_slot(Some(params.visualization_selected_pad()));
-        let meta = state
-            .engine
-            .fill_visualization(state.last_tempo, &mut state.visualization_scratch);
-        params.publish_waveform(&state.visualization_scratch, meta);
+        let meta = state.engine.fill_performance_visualization(
+            state.last_tempo,
+            &mut state.input_visualization,
+            &mut state.visualization_scratch,
+            &mut state.stage_visualization,
+        );
+        params.publish_waveform(
+            &state.visualization_scratch,
+            meta,
+            &state.input_visualization,
+            &state.stage_visualization,
+        );
     }
 
     fn process(
@@ -205,10 +217,18 @@ impl PluginLogic for BufferUppercut {
         let admission = state.engine.admission_meta();
         params.set_admission_pad_bits(admission.active_mask, admission.suspended_mask);
         if frames >= state.visualization_countdown {
-            let meta = state
-                .engine
-                .fill_visualization(state.last_tempo, &mut state.visualization_scratch);
-            params.publish_waveform(&state.visualization_scratch, meta);
+            let meta = state.engine.fill_performance_visualization(
+                state.last_tempo,
+                &mut state.input_visualization,
+                &mut state.visualization_scratch,
+                &mut state.stage_visualization,
+            );
+            params.publish_waveform(
+                &state.visualization_scratch,
+                meta,
+                &state.input_visualization,
+                &state.stage_visualization,
+            );
             state.visualization_countdown =
                 (state.sample_rate / VISUALIZATION_REFRESH_HZ).round() as usize;
         } else {

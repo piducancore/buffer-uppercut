@@ -16,6 +16,9 @@ Do not use ADRs as task trackers or changelogs. Current work belongs in
 
 Current records:
 
+- [0016 — Visualize the complete performance chain](0016-live-performance-visualization.md)
+  replaces selected-buffer display priority with aligned input/output and live stages.
+
 - [0015 — Expanded Beat Repeat Cell divisions](0015-expanded-repeat-cells.md)
   defines the separate 15-choice Cell scale and deliberate state reinterpretation.
 
@@ -50,3 +53,5 @@ Current records:
 - [0014 — Host Trigger gestures and durable key maps](0014-performance-input-and-key-maps.md)
   governs local gesture automation, physical-key assignment, unified durable
   persistence, and released recall; host recording acceptance remains pending.
+
+- [0017: Press-order performance chain](0017-press-order-chain.md)

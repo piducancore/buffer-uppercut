@@ -5,6 +5,8 @@
 //! mutates already-prepared storage.
 
 mod pitch;
+mod visualization;
+pub use visualization::{STAGE_TRACE_SAMPLES, StageVisualization};
 mod vinyl;
 
 pub const NUM_PADS: usize = 16;
@@ -823,6 +825,11 @@ pub struct Engine {
     slots: [SlotRuntime; NUM_PADS],
     rolling_l: Vec<f32>,
     rolling_r: Vec<f32>,
+    output_history_l: Vec<f32>,
+    output_history_r: Vec<f32>,
+    visual_configs: [PadConfig; NUM_PADS],
+    input_peaks: Vec<VisualizationBin>,
+    output_peaks: Vec<VisualizationBin>,
     rolling_write_pos: usize,
     request_counter: u64,
     admission_counter: u64,
@@ -836,6 +843,11 @@ impl Default for Engine {
             slots: std::array::from_fn(SlotRuntime::new),
             rolling_l: Vec::new(),
             rolling_r: Vec::new(),
+            output_history_l: Vec::new(),
+            output_history_r: Vec::new(),
+            visual_configs: [PadConfig::default(); NUM_PADS],
+            input_peaks: Vec::new(),
+            output_peaks: Vec::new(),
             rolling_write_pos: 0,
             request_counter: 0,
             admission_counter: 0,
@@ -866,6 +878,16 @@ impl Engine {
         self.rolling_l.resize(length, 0.0);
         self.rolling_r.clear();
         self.rolling_r.resize(length, 0.0);
+        self.output_history_l.resize(length, 0.0);
+        self.output_history_r.resize(length, 0.0);
+        self.input_peaks.resize(
+            length.div_ceil(visualization::PEAK_STRIDE),
+            VisualizationBin::default(),
+        );
+        self.output_peaks.resize(
+            length.div_ceil(visualization::PEAK_STRIDE),
+            VisualizationBin::default(),
+        );
         for slot in &mut self.slots {
             slot.buffer.prepare(length);
             slot.vinyl.prepare(self.sample_rate);
@@ -878,6 +900,11 @@ impl Engine {
     pub fn clear_transient(&mut self) {
         self.rolling_l.fill(0.0);
         self.rolling_r.fill(0.0);
+        self.output_history_l.fill(0.0);
+        self.output_history_r.fill(0.0);
+        self.visual_configs = [PadConfig::default(); NUM_PADS];
+        self.input_peaks.fill(VisualizationBin::default());
+        self.output_peaks.fill(VisualizationBin::default());
         self.rolling_write_pos = 0;
         self.request_counter = 0;
         self.admission_counter = 0;
@@ -908,24 +935,27 @@ impl Engine {
         };
         let samples_per_beat = self.sample_rate * 60.0 / tempo;
         self.resolve_slots(state, samples_per_beat);
+        self.visual_configs = state.pads;
         for (slot, config) in self.slots.iter_mut().zip(state.pads) {
             if slot.active && config.effect_type == EffectType::Vinyl {
                 slot.vinyl.configure(config.macros);
             }
         }
 
+        let chain_order = self.chain_order();
+        let visualization_start = self.rolling_write_pos;
         for sample in 0..frames {
             let input = [
                 Self::finite_f64(input_l[sample]),
                 Self::finite_f64(input_r[sample]),
             ];
+            let written = self.rolling_write_pos;
             self.rolling_l[self.rolling_write_pos] = input[0] as f32;
             self.rolling_r[self.rolling_write_pos] = input[1] as f32;
-            self.rolling_write_pos =
-                Self::wrap_length(self.rolling_write_pos as i64 + 1, self.rolling_l.len());
+            self.rolling_write_pos = (self.rolling_write_pos + 1) & (self.rolling_l.len() - 1);
 
             let mut signal = input;
-            for slot_index in 0..NUM_PADS {
+            for slot_index in chain_order {
                 let config = state.pads[slot_index];
                 let slot = &mut self.slots[slot_index];
                 let stage_input = signal;
@@ -948,7 +978,34 @@ impl Engine {
             }
             output_l[sample] = Self::finite_f64(signal[0]);
             output_r[sample] = Self::finite_f64(signal[1]);
+            self.output_history_l[written] = output_l[sample] as f32;
+            self.output_history_r[written] = output_r[sample] as f32;
         }
+        visualization::update_peaks(
+            &mut self.input_peaks,
+            &self.rolling_l,
+            &self.rolling_r,
+            visualization_start,
+            frames,
+        );
+        visualization::update_peaks(
+            &mut self.output_peaks,
+            &self.output_history_l,
+            &self.output_history_r,
+            visualization_start,
+            frames,
+        );
+    }
+
+    /// Held stages keep their original press position; unheld histories record
+    /// the final chain output, ready for a new stage appended at the end.
+    fn chain_order(&self) -> [usize; NUM_PADS] {
+        let mut order = std::array::from_fn(|i| i);
+        order.sort_unstable_by_key(|&i| {
+            let request = self.slots[i].request_order;
+            (request == 0, request, i)
+        });
+        order
     }
 
     fn resolve_slots(&mut self, state: &PerformanceState, samples_per_beat: f64) {
@@ -1172,8 +1229,14 @@ impl Engine {
 
     #[must_use]
     pub fn history_bytes(&self) -> usize {
-        let rolling = (self.rolling_l.len() + self.rolling_r.len()) * std::mem::size_of::<f32>();
+        let rolling = (self.rolling_l.len()
+            + self.rolling_r.len()
+            + self.output_history_l.len()
+            + self.output_history_r.len())
+            * std::mem::size_of::<f32>();
         rolling
+            + (self.input_peaks.len() + self.output_peaks.len())
+                * std::mem::size_of::<VisualizationBin>()
             + self
                 .slots
                 .iter()
@@ -2069,7 +2132,7 @@ mod tests {
     }
 
     #[test]
-    fn chain_order_is_slot_order_not_press_order() {
+    fn chain_order_follows_press_order() {
         let input: Vec<f64> = (0..256)
             .map(|sample| (f64::from(sample) * 0.113).sin() * 0.8)
             .collect();
@@ -2091,7 +2154,7 @@ mod tests {
         };
         let forward_press = render_press_order(0, 1);
         let reverse_press = render_press_order(1, 0);
-        assert_eq!(forward_press, reverse_press);
+        assert_ne!(forward_press, reverse_press);
 
         let mut swapped = state;
         swapped.pads.swap(0, 1);
@@ -2109,6 +2172,31 @@ mod tests {
             &swapped,
         );
         assert_ne!(forward_press, swapped_output);
+        assert_eq!(reverse_press, swapped_output);
+    }
+
+    #[test]
+    fn repress_appends_and_restoration_preserves_press_position() {
+        let mut engine = Engine::new(2_000.0);
+        let mut state = PerformanceState::default();
+        for pad in &mut state.pads {
+            *pad = default_pad_config(EffectType::Gate);
+        }
+        for pad in (0..7).rev() {
+            state.held[pad] = true;
+            engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        }
+        assert_eq!(&engine.chain_order()[..7], &[6, 5, 4, 3, 2, 1, 0]);
+        assert!(engine.slots[6].suspended);
+        state.held[0] = false;
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert!(engine.slots[6].active);
+        assert_eq!(&engine.chain_order()[..6], &[6, 5, 4, 3, 2, 1]);
+        state.held[4] = false;
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        state.held[4] = true;
+        engine.process(&[], &[], &mut [], &mut [], 120.0, &state);
+        assert_eq!(&engine.chain_order()[..6], &[6, 5, 3, 2, 1, 4]);
     }
 
     #[test]
@@ -2168,7 +2256,7 @@ mod tests {
     }
 
     #[test]
-    fn configured_buffer_histories_capture_their_own_stage_inputs() {
+    fn unheld_buffer_histories_capture_chain_output_for_append() {
         let input: Vec<f64> = (0..64)
             .map(|sample| (f64::from(sample) * 0.19).sin() * 0.77)
             .collect();
@@ -2215,7 +2303,7 @@ mod tests {
         );
         assert_eq!(
             &engine.slots[0].buffer.history_l[..input.len()],
-            input
+            output
                 .iter()
                 .map(|sample| *sample as f32)
                 .collect::<Vec<_>>()
@@ -2322,7 +2410,9 @@ mod tests {
         }));
         assert_eq!(
             engine.history_bytes(),
-            (NUM_PADS + 1) * 2 * history_len * std::mem::size_of::<f32>()
+            (NUM_PADS + 2) * 2 * history_len * std::mem::size_of::<f32>()
+                + 2 * history_len.div_ceil(visualization::PEAK_STRIDE)
+                    * std::mem::size_of::<VisualizationBin>()
         );
     }
 

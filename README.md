@@ -13,12 +13,12 @@ It provides:
   default-on layout in the standalone development host, with configurable keys;
 - beat repeat, reverse, tape stop, gate, a held grain Pitch with Down/Up action
   roles, a multimode Filter, LoFi, and Vinyl record-wear effects;
-- deterministic serial stacking in ascending slot order, including repeated
+- deterministic serial stacking in press order, including repeated
   instances of the same effect, with a six-processor admission cap;
 - an effect-type knob plus seven effect-aware macro knobs per pad, with semantic
   labels and values;
 - independent eight-second stereo `f32` histories for configured buffer slots,
-  `f64` signal processing, and a stereo history/captured-slice waveform;
+  `f64` signal processing, and a live stereo input/output waveform with per-stage performance visuals;
 - five factory kits, 144 automatable parameters, host-native preset recall, and
   a versioned `.bupreset`
   version 3 codec carrying the same durable sound configuration and key map;

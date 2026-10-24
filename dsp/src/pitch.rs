@@ -15,6 +15,9 @@ pub(crate) struct GrainPitch {
 }
 
 impl GrainPitch {
+    pub(crate) fn visualization(&self) -> (f32, f32) {
+        (self.phase as f32, self.smoothed_semitones as f32)
+    }
     pub(crate) fn new(slot: usize) -> Self {
         Self {
             delay_l: Vec::new(),

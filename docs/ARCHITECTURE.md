@@ -51,7 +51,7 @@ dependencies.
 ## Audio processing flow
 
 `PluginLogic64::reset` runs at activation and sample-rate/block-size changes. It
-sizes all wrapper scratch, the rolling visualization history, and one independent
+sizes all wrapper scratch, the rolling visualization history, input/output visualization histories and one independent
 stereo history for each of the 16 performance slots. Every slot history uses
 `f32` storage and covers at least eight seconds per channel at the active sample
 rate. Serial effect calculations and wrapper audio remain `f64`.
@@ -69,7 +69,7 @@ For every process block:
 5. Copy host input into activation-sized planar `f64` scratch.
 6. Resolve held, active, and suspended continuous slots under the six-processor
    cap.
-7. Process active stages in ascending slot order. Each stage receives the prior
+7. Process active stages in press order. Each stage receives the prior
    stage's output and uses that signal as its local wet/dry reference.
 8. Record every configured buffer slot's chain-position input into its own
    history, whether the slot is released, active, or suspended.
@@ -82,14 +82,14 @@ implemented.
 ## Serial slot and admission model
 
 Every held continuous effect is an independent stage, including two instances of
-the same exact effect type. The audible chain always follows ascending slot
-number, never press order or restoration order.
+the same exact effect type. The audible chain always follows press
+order, preserved across suspension and restoration.
 
 At most six continuous processors are active. A new request at capacity suspends
 the oldest admitted active slot and becomes active immediately. A suspended
 slot remains held but is not processed. When capacity returns, still-held
 suspended requests are restored most-recently-held first, after which the audible
-chain is again sorted by slot number.
+chain retains each held stage’s original press position.
 
 Suspension freezes mutable processor state such as phase, filter state, gate
 gain, LoFi hold state, and a buffer effect's capture/playback state. It does not
@@ -114,9 +114,9 @@ Slice Pitch control and do not read Active Shift.
 ## Buffer history and type changes
 
 A buffer-configured slot records before its own processor is applied. Therefore
-its ring contains the output of every active lower-numbered stage and none of the
-higher-numbered stages. This is the exact input the slot would receive in the
-serial chain.
+its ring contains its actual chain input while held. Unheld buffer slots record
+final output, preparing lookback for their next press at the end of the chain.
+Existing captured material is retained when upstream stages change.
 
 Changing buffer type within a slot preserves that slot's history while resetting
 capture/playback processor state. Changing from a non-buffer type to a buffer
@@ -216,7 +216,7 @@ The native editor uses a cream chassis, charcoal instrument panels, and acid
 yellow accents. Factory navigation and tempo sit above the stereo monitor;
 an aligned four-by-four bank of light keycaps sits beside the effect selector
 and all seven macros. Key assignment controls and their status sit below the
-knobs in the selected-pad panel. A static signal-route strip describes audio flow.
+knobs in the selected-pad panel. The waveform panel contains the live pad-triggered serial chain.
 
 Yellow outlines and a left marker identify the selected pad; yellow fill and
 ACTIVE/HELD text identify performance holds, and warm orange identifies suspended
@@ -226,16 +226,18 @@ is text, not an embedded menu. The editor has no extra modifier/spacebar trigger
 
 ## Visualization flow
 
-`Engine::fill_visualization` reads preallocated `f32` history into 256 stereo
-min/max bins. The wrapper publishes those bins through a sequence-checked atomic
-bridge. The UI accepts only a complete sequence; otherwise it retains the
-previous frame. Slint creates dynamic path geometry on the UI thread.
+`dsp/src/visualization.rs` owns telemetry extraction and peak-cache helpers.
+`Engine::fill_performance_visualization` extracts aligned input and final-output
+stereo min/max bins plus sixteen fixed stage records at 30 Hz. The wrapper
+publishes them through a sequence-checked atomic bridge. The UI accepts a complete
+snapshot or retains its previous frame, then builds Slint paths on the UI thread.
+The timeline always covers the newest four beats, limited by history capacity.
 
-Rolling mode displays the newest four beats. For captured mode, the
-editor-selected held buffer slot wins even when suspended. Its processor
-capture/playhead state is frozen while suspended, although its configured ring
-continues recording. If the selected slot does not qualify, the lowest-numbered
-active buffer slot wins. If neither exists, rolling history is displayed.
+Active stages appear in press order; suspended stages appear separately.
+Buffer stages expose independent 32-sample capture traces, read position, direction,
+rate, and duration. Other stage glyphs illustrate gate gain/phase, grain phase and
+shift, filter cutoff, LoFi quantization, and Vinyl drift. Selecting a stage changes
+pad focus only. See [ADR 0016](adr/0016-live-performance-visualization.md).
 
 ## Concurrency model
 

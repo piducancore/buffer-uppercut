@@ -1,3 +1,4 @@
+use buffer_uppercut_dsp::StageVisualization;
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -5,8 +6,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use buffer_uppercut_dsp::{
-    EffectType, FilterMode, PitchRole, VisualizationBin, VisualizationMode, default_pad_config,
-    format_control_value,
+    EffectType, FilterMode, PitchRole, VisualizationBin, default_pad_config, format_control_value,
 };
 use buffer_uppercut_kit::{FACTORY_KIT_COUNT, Kit, factory_kit};
 use truce::core::editor::PluginContextReadF32;
@@ -30,6 +30,7 @@ const WAVEFORM_AMPLITUDE: f32 = 14.0;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EditorPreview {
     Captured,
+    Suspended,
     Pitch,
     Vinyl,
 }
@@ -44,7 +45,7 @@ struct EffectGesture {
 impl EditorPreview {
     const fn selected_pad(self) -> usize {
         match self {
-            Self::Captured => 1,
+            Self::Captured | Self::Suspended => 1,
             Self::Pitch => 9,
             Self::Vinyl => 0,
         }
@@ -52,10 +53,22 @@ impl EditorPreview {
 
     const fn held_pad(self) -> Option<usize> {
         match self {
-            Self::Captured => Some(1),
+            Self::Captured | Self::Suspended => Some(1),
             Self::Pitch => None,
             Self::Vinyl => Some(0),
         }
+    }
+    fn active(self, pad: usize) -> bool {
+        match self {
+            Self::Captured => [1, 6, 8, 12].contains(&pad),
+            Self::Suspended => [1, 6, 7, 8, 10, 15].contains(&pad),
+            Self::Vinyl => pad == 0,
+            Self::Pitch => false,
+        }
+    }
+
+    fn suspended(self, pad: usize) -> bool {
+        self == Self::Suspended && [12, 14].contains(&pad)
     }
 }
 
@@ -69,6 +82,7 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
         input.lock().expect("pad input").attach(state.clone());
         let ui = BufferUppercutUi::new().expect("create Buffer Uppercut Slint editor");
         let editor_preview = configured_editor_preview();
+        ui.on_scale_path(|data, sx, sy| scale_path(&data, sx, sy).into());
         let selected_pad = Rc::new(Cell::new(
             editor_preview.map_or(0, EditorPreview::selected_pad),
         ));
@@ -86,6 +100,19 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                 }
             }
             state.params().set_kit_name(&kit.name);
+        }
+        if editor_preview == Some(EditorPreview::Suspended) {
+            for (pad, effect) in [(14, EffectType::LoFi), (15, EffectType::Vinyl)] {
+                let config = default_pad_config(effect);
+                state
+                    .params()
+                    .set_plain(pad_type_id(pad), effect as u8 as f64);
+                for (control, value) in config.macros.iter().enumerate() {
+                    state
+                        .params()
+                        .set_plain(pad_control_id(pad, control), *value);
+                }
+            }
         }
         let auto_select_midi = Rc::new(Cell::new(true));
         let factory_kit_index = Rc::new(Cell::new(Some(
@@ -307,6 +334,10 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
             });
         }
 
+        {
+            let selected_pad = selected_pad.clone();
+            ui.on_focus_stage(move |pad| selected_pad.set(valid_pad_index(pad)));
+        }
         let waveform = Rc::new(RefCell::new(WaveformSnapshot::default()));
         let input = input.clone();
         Box::new(move |state: &PluginContext<BufferUppercutParams>| {
@@ -374,9 +405,14 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                         )),
                         held: trigger_held
                             || midi_held_bits & (1_u16 << pad) != 0
-                            || editor_preview.and_then(EditorPreview::held_pad) == Some(pad),
-                        active: active_pad_bits & (1_u16 << pad) != 0,
-                        suspended: suspended_pad_bits & (1_u16 << pad) != 0,
+                            || editor_preview.and_then(EditorPreview::held_pad) == Some(pad)
+                            || editor_preview.is_some_and(|preview| {
+                                preview.active(pad) || preview.suspended(pad)
+                            }),
+                        active: active_pad_bits & (1_u16 << pad) != 0
+                            || editor_preview.is_some_and(|preview| preview.active(pad)),
+                        suspended: suspended_pad_bits & (1_u16 << pad) != 0
+                            || editor_preview.is_some_and(|preview| preview.suspended(pad)),
                         selected: pad == selected,
                     },
                 );
@@ -411,13 +447,36 @@ pub fn create(params: Arc<BufferUppercutParams>) -> Box<dyn Editor> {
                 let (left, right) = waveform_paths(&waveform.bins);
                 ui.set_waveform_left(SharedString::from(left));
                 ui.set_waveform_right(SharedString::from(right));
-                ui.set_waveform_playhead(waveform.meta.normalized_playhead.clamp(0.0, 1.0));
-                ui.set_waveform_captured(waveform.meta.mode == VisualizationMode::Capture);
-                ui.set_waveform_effect_index(waveform.meta.active_effect as i32);
-                ui.set_waveform_mode(SharedString::from(match waveform.meta.mode {
-                    VisualizationMode::Rolling => "ROLLING / 4 BEATS",
-                    VisualizationMode::Capture => "CAPTURED CELL",
-                }));
+                let (left, right) = waveform_paths(&waveform.input_bins);
+                ui.set_input_left(left.into());
+                ui.set_input_right(right.into());
+                let key_map = state.params().key_map();
+                let mut ordered: Vec<_> = waveform
+                    .stages
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, stage)| stage.active || stage.suspended)
+                    .collect();
+                ordered.sort_by_key(|(_, stage)| stage.chain_position);
+                let views: Vec<_> = ordered
+                    .into_iter()
+                    .map(|(pad, stage)| {
+                        stage_view(pad, key_map.key(pad).expect("pad").label(), stage)
+                    })
+                    .collect();
+                ui.set_chain_stages(ModelRc::new(VecModel::from(
+                    views
+                        .iter()
+                        .filter(|v| !v.suspended)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )));
+                ui.set_suspended_stages(ModelRc::new(VecModel::from(
+                    views
+                        .into_iter()
+                        .filter(|v| v.suspended)
+                        .collect::<Vec<_>>(),
+                )));
                 ui.set_waveform_status(SharedString::from(waveform_status(&waveform)));
             }
         })
@@ -496,6 +555,7 @@ fn configured_editor_preview() -> Option<EditorPreview> {
 fn parse_editor_preview(value: &str) -> Option<EditorPreview> {
     match value {
         "captured" => Some(EditorPreview::Captured),
+        "suspended" => Some(EditorPreview::Suspended),
         "pitch" => Some(EditorPreview::Pitch),
         "vinyl" => Some(EditorPreview::Vinyl),
         _ => None,
@@ -505,7 +565,28 @@ fn parse_editor_preview(value: &str) -> Option<EditorPreview> {
 fn apply_editor_preview(ui: &BufferUppercutUi, preview: Option<EditorPreview>) {
     match preview {
         Some(EditorPreview::Captured) => apply_captured_editor_preview(ui),
-        Some(EditorPreview::Pitch | EditorPreview::Vinyl) | None => {}
+        Some(EditorPreview::Suspended) => {
+            apply_captured_editor_preview(ui);
+            apply_suspended_editor_preview(ui);
+        }
+        Some(EditorPreview::Vinyl) => {
+            let config = factory_kit(4).state.pads[0];
+            let stage = StageVisualization {
+                effect: EffectType::Vinyl,
+                active: true,
+                phase: 0.38,
+                value: 0.42,
+                wet: config.macros[6] as f32,
+                controls: config.macros.map(|v| v as f32),
+                activity: 0.3,
+                ..StageVisualization::default()
+            };
+            ui.set_chain_stages(ModelRc::new(VecModel::from(vec![stage_view(
+                0, "1", &stage,
+            )])));
+            ui.set_waveform_status("1/6 ACTIVE  ·  4 BEATS / 2.00s".into());
+        }
+        Some(EditorPreview::Pitch) | None => {}
     }
 }
 
@@ -528,13 +609,82 @@ fn apply_captured_editor_preview(ui: &BufferUppercutUi) {
     let (left, right) = waveform_paths(&bins);
     ui.set_waveform_left(SharedString::from(left));
     ui.set_waveform_right(SharedString::from(right));
-    ui.set_waveform_playhead(0.64);
-    ui.set_waveform_captured(true);
-    ui.set_waveform_effect_index(EffectType::BeatRepeat as i32);
-    ui.set_waveform_mode(SharedString::from("CAPTURED CELL"));
-    ui.set_waveform_status(SharedString::from(
-        "PAD 02 / REPEAT  ·  FWD 0.50x  ·  0.50s",
-    ));
+    let (left, right) = waveform_paths(&bins);
+    ui.set_input_left(left.into());
+    ui.set_input_right(right.into());
+    let mut views = Vec::new();
+    for (pad, key, effect, phase, value) in [
+        (1, "2", EffectType::BeatRepeat, 0.64, 0.5),
+        (6, "E", EffectType::Reverse, 0.3, -1.0),
+        (8, "A", EffectType::Gate, 0.6, 0.8),
+        (12, "Z", EffectType::Filter, 0.45, 450.0),
+    ] {
+        let mut stage = StageVisualization {
+            effect,
+            active: true,
+            phase,
+            value,
+            wet: 1.0,
+            duration: 0.5,
+            controls: [0.5; 7],
+            ..StageVisualization::default()
+        };
+        if effect == EffectType::Filter {
+            stage.controls[0] = 0.0;
+        }
+        for (i, v) in stage.trace.iter_mut().enumerate() {
+            *v = (i as f32 * 1.3).sin() * 0.6;
+        }
+        views.push(stage_view(pad, key, &stage));
+    }
+    ui.set_chain_stages(ModelRc::new(VecModel::from(views)));
+    ui.set_waveform_status("4/6 ACTIVE  ·  4 BEATS / 2.00s".into());
+}
+
+fn apply_suspended_editor_preview(ui: &BufferUppercutUi) {
+    let mut stages = Vec::new();
+    for (pad, key, effect, value) in [
+        (1, "2", EffectType::BeatRepeat, 0.5),
+        (6, "E", EffectType::Reverse, -1.0),
+        (7, "R", EffectType::TapeStop, 0.24),
+        (8, "A", EffectType::Gate, 0.65),
+        (10, "D", EffectType::Pitch, 7.0),
+        (15, "V", EffectType::Vinyl, 2.4),
+    ] {
+        let stage = StageVisualization {
+            effect,
+            active: true,
+            phase: 0.42,
+            value,
+            wet: 0.8,
+            controls: [0.5; 7],
+            duration: 0.5,
+            activity: 0.7,
+            trace: std::array::from_fn(|i| (i as f32 * 1.3).sin() * 0.6),
+            ..StageVisualization::default()
+        };
+        stages.push(stage_view(pad, key, &stage));
+    }
+    ui.set_chain_stages(ModelRc::new(VecModel::from(stages)));
+    let paused = [
+        StageVisualization {
+            effect: EffectType::Filter,
+            suspended: true,
+            value: 1200.0,
+            ..StageVisualization::default()
+        },
+        StageVisualization {
+            effect: EffectType::LoFi,
+            suspended: true,
+            value: 8.0,
+            ..StageVisualization::default()
+        },
+    ];
+    ui.set_suspended_stages(ModelRc::new(VecModel::from(vec![
+        stage_view(12, "Z", &paused[0]),
+        stage_view(14, "C", &paused[1]),
+    ])));
+    ui.set_waveform_status("6/6 ACTIVE  ·  2 PAUSED  ·  4 BEATS / 2.00s".into());
 }
 
 fn parse_editor_size(value: &str) -> Option<(u32, u32)> {
@@ -661,22 +811,159 @@ fn pad_effect_abbreviation(effect: EffectType, first_macro: f32) -> &'static str
 }
 
 fn waveform_status(snapshot: &WaveformSnapshot) -> String {
-    let meta = snapshot.meta;
-    let duration = format!("{:.2}s", meta.duration_seconds.max(0.0));
-    match meta.mode {
-        VisualizationMode::Rolling => format!("STEREO HISTORY  ·  {duration}"),
-        VisualizationMode::Capture => {
-            let pad = meta
-                .active_pad
-                .map_or_else(|| "--".to_owned(), |pad| format!("{:02}", pad + 1));
-            let direction = if meta.reverse { "REV" } else { "FWD" };
-            format!(
-                "PAD {pad} / {}  ·  {direction} {:.2}x  ·  {duration}",
-                effect_abbreviation(meta.active_effect),
-                meta.play_rate
+    let active = snapshot.stages.iter().filter(|stage| stage.active).count();
+    format!(
+        "{active}/6 ACTIVE  ·  4 BEATS / {:.2}s",
+        snapshot.meta.duration_seconds.max(0.0)
+    )
+}
+
+fn stage_view(pad: usize, key: &str, stage: &StageVisualization) -> StageView {
+    let detail = match stage.effect {
+        EffectType::BeatRepeat | EffectType::Reverse | EffectType::TapeStop => format!(
+            "{} {:.2}x / {:.2}s",
+            if stage.value < 0.0 { "←" } else { "→" },
+            stage.value.abs(),
+            stage.duration
+        ),
+        EffectType::Gate => format!("GATE {:03.0}%", stage.value * 100.0),
+        EffectType::Pitch => format!("{:+.1} st / GRAINS", stage.value),
+        EffectType::Filter => format!("{:.0} Hz / CUTOFF", stage.value),
+        EffectType::LoFi => format!(
+            "{:.0} BIT / {:.1}k",
+            stage.value,
+            (1000.0 + stage.controls[0] * 43100.0) / 1000.0
+        ),
+        EffectType::Vinyl => format!("{:.2} ms / WOW", stage.value),
+        EffectType::Off => String::new(),
+    };
+    StageView {
+        pad: pad as i32,
+        label: format!(
+            "{:02} {} / {}",
+            pad + 1,
+            key,
+            pad_effect_abbreviation(stage.effect, stage.controls[0])
+        )
+        .into(),
+        detail: (if stage.wet <= 0.0 {
+            "DRY".to_owned()
+        } else {
+            detail
+        })
+        .into(),
+        path: stage_signature(stage).into(),
+        phase: stage.phase.clamp(0.0, 1.0),
+        strength: stage.wet.clamp(0.0, 1.0),
+        cursor: stage.effect.is_buffer() || stage.effect == EffectType::Gate,
+        reverse: stage.value < 0.0,
+        suspended: stage.suspended,
+    }
+}
+
+/// Effect glyphs describe processor state; only buffer traces depict audio.
+fn stage_signature(stage: &StageVisualization) -> String {
+    let mut path = String::with_capacity(1800);
+    for i in 0..64 {
+        let x = i as f32 / 63.0;
+        let y = match stage.effect {
+            EffectType::BeatRepeat | EffectType::Reverse | EffectType::TapeStop => {
+                stage.trace[(x * 31.0).round() as usize].clamp(-1.0, 1.0)
+            }
+            EffectType::Gate => {
+                let duty = 0.05 + 0.90 * stage.controls[1];
+                if (x * 4.0).fract() < duty {
+                    0.75
+                } else {
+                    -0.75
+                }
+            }
+            EffectType::Pitch => {
+                let grain = (x - stage.phase).rem_euclid(1.0);
+                1.0 - 4.0 * (grain - 0.5).abs()
+            }
+            EffectType::Filter => {
+                let cutoff = stage.phase;
+                let low = 1.0 / (1.0 + ((x - cutoff) * 20.0).exp());
+                let mode = FilterMode::from_normalized(f64::from(stage.controls[0]));
+                let response = match mode {
+                    FilterMode::LowPass => low,
+                    FilterMode::HighPass => 1.0 - low,
+                    FilterMode::BandPass => (-(x - cutoff).powi(2) * 90.0).exp(),
+                };
+                (response + stage.controls[2] * (-(x - cutoff).powi(2) * 600.0).exp() * 0.3) * 1.5
+                    - 0.75
+            }
+            EffectType::LoFi => {
+                let steps = 4.0 + stage.controls[0] * 24.0;
+                let sample =
+                    (((x * steps).floor() / steps) * std::f32::consts::TAU + stage.phase).sin();
+                let levels = 2.0_f32.powf(stage.value.clamp(2.0, 6.0) - 1.0);
+                (sample * levels).round() / levels * 0.8
+            }
+            EffectType::Vinyl => {
+                let phase = stage.phase * std::f32::consts::TAU;
+                ((x * std::f32::consts::TAU + phase).sin() * stage.controls[0] * 0.7
+                    + (x * 32.0 + stage.secondary_phase * std::f32::consts::TAU).sin()
+                        * stage.controls[1]
+                        * 0.25)
+                    .clamp(-1.0, 1.0)
+                    + (x * 170.0).sin() * stage.controls[5] * 0.12
+                    + if (x - 0.72).abs() < 0.02 {
+                        stage.activity * 0.9
+                    } else {
+                        0.0
+                    }
+            }
+            EffectType::Off => 0.0,
+        };
+        write!(
+            path,
+            "{} {:.2} {:.2} ",
+            if i == 0 { "M" } else { "L" },
+            x * 100.0,
+            12.0 - y.clamp(-1.0, 1.0) * 10.0
+        )
+        .expect("string");
+    }
+    if stage.effect == EffectType::Pitch {
+        for i in 0..32 {
+            let x = i as f32 / 31.0;
+            let grain = (x - stage.phase + 0.5).rem_euclid(1.0);
+            let y = 1.0 - 4.0 * (grain - 0.5).abs();
+            write!(
+                path,
+                "{} {:.2} {:.2} ",
+                if i == 0 { "M" } else { "L" },
+                x * 100.0,
+                12.0 - y * 7.0
             )
+            .expect("string");
         }
     }
+    path
+}
+
+/// Slint's software renderer ignores scale transforms. Build physical path
+/// coordinates so both native and screenshot renderers share the same geometry.
+fn scale_path(path: &str, sx: f32, sy: f32) -> String {
+    if !sx.is_finite() || !sy.is_finite() || sx <= 0.0 || sy <= 0.0 {
+        return String::new();
+    }
+    let mut result = String::with_capacity(path.len());
+    let mut x = true;
+    for token in path.split_whitespace() {
+        if matches!(token, "M" | "L" | "Z") {
+            result.push_str(token);
+            result.push(' ');
+            x = true;
+        } else if let Ok(value) = token.parse::<f32>() {
+            let scaled = value * if x { sx } else { sy };
+            write!(result, "{scaled:.2} ").expect("string");
+            x = !x;
+        }
+    }
+    result
 }
 
 fn waveform_paths(bins: &[VisualizationBin]) -> (String, String) {

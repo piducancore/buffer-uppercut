@@ -21,10 +21,23 @@ pub(crate) struct Vinyl {
     phase_step: [f64; 3],
     sample_rate: f64,
     dust_decay: f64,
+    visual_dust: f64,
+    visual_decay: f64,
     surface_coefficient: f64,
 }
 
 impl Vinyl {
+    pub(crate) fn visualization(&self) -> (f32, f32, f32, f32) {
+        let slow = 0.72 * self.phase[0].sin() + 0.28 * self.phase[1].sin();
+        let delay_ms = 6.0 * self.current[0].powi(2) * (1.0 + slow)
+            + 0.35 * self.current[1].powi(2) * (1.0 + self.phase[2].sin());
+        (
+            (self.phase[0] / TAU) as f32,
+            delay_ms as f32,
+            (self.phase[2] / TAU) as f32,
+            self.visual_dust as f32,
+        )
+    }
     pub(crate) fn new(slot: usize) -> Self {
         let seed = 0xa341_316c_u32.wrapping_add((slot as u32).wrapping_mul(0x9e37_79b9));
         Self {
@@ -44,6 +57,8 @@ impl Vinyl {
             phase_step: [0.0; 3],
             sample_rate: 44_100.0,
             dust_decay: 0.0,
+            visual_dust: 0.0,
+            visual_decay: 0.0,
             surface_coefficient: 1.0,
         }
     }
@@ -54,6 +69,7 @@ impl Vinyl {
             .resize((sample_rate * 0.014).ceil() as usize + 4, [0.0; 2]);
         self.smoothing = 1.0 - (-1.0 / (sample_rate * 0.020)).exp();
         self.phase_step = [0.55, 0.83, 8.7].map(|hz| TAU * hz / sample_rate);
+        self.visual_decay = (-1.0 / (sample_rate * 0.080)).exp();
         self.dust_decay = (-1.0 / (sample_rate * 0.0007)).exp();
         self.surface_coefficient = 1.0 - (-TAU * 700.0 / sample_rate).exp();
         self.reset();
@@ -66,6 +82,7 @@ impl Vinyl {
         self.tone = [0.0; 2];
         self.surface = [0.0; 2];
         self.dust = [0.0; 2];
+        self.visual_dust = 0.0;
         self.rng = self.seed;
         self.initialized = false;
     }
@@ -93,6 +110,10 @@ impl Vinyl {
             }
         }
         let [wow, flutter, wear, drive, dust, noise, wet] = self.current;
+        self.visual_dust *= self.visual_decay;
+        if self.target[4] == 0.0 {
+            self.visual_dust = 0.0;
+        }
         // A shared read position preserves stereo timing. Unequal slow rates
         // avoid a single obvious periodic vibrato; the delay is always causal.
         let slow = 0.72 * self.phase[0].sin() + 0.28 * self.phase[1].sin();
@@ -134,6 +155,9 @@ impl Vinyl {
             } else {
                 0.0
             };
+            if self.target[4] > 0.0 {
+                self.visual_dust = self.visual_dust.max(impulse.abs() * 4.0);
+            }
             // Bipolar, zero-DC pulse: sharp onset and a short opposing tail.
             let click = impulse - (1.0 - self.dust_decay) * self.dust[channel];
             self.dust[channel] = self.dust_decay * self.dust[channel] + impulse;

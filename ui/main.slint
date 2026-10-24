@@ -11,6 +11,18 @@ export struct PadView {
     selected: bool,
 }
 
+export struct StageView {
+    pad: int,
+    label: string,
+    detail: string,
+    path: string,
+    phase: float,
+    strength: float,
+    cursor: bool,
+    reverse: bool,
+    suspended: bool,
+}
+
 export struct MacroView {
     label: string,
     value: float,
@@ -318,150 +330,126 @@ component PerformancePad inherits Rectangle {
     }
 }
 
-component WaveformPanel inherits Rectangle {
-    in property <string> left-path;
-    in property <string> right-path;
-    in property <float> playhead;
-    in property <bool> captured;
-    in property <string> mode;
-    in property <string> status;
-
-    background: root.captured ? #262d21 : #232726;
-    border-radius: 6px;
+component StageCard inherits Rectangle {
+    in property <StageView> stage;
+    in property <bool> selected;
+    callback select-stage(int);
+    pure callback scale-path(string, float, float) -> string;
+    background: root.selected ? #30382a : #272e2b;
+    border-radius: 4px;
     border-width: 1px;
-    border-color: root.captured ? #e5fa36 : #232726;
-
+    border-color: root.stage.suspended ? #d99b64 : root.selected ? #e5fa36 : #465047;
+    property <color> accent: root.stage.suspended ? #d99b64 : #e5fa36;
     VerticalLayout {
-        padding: 12px;
-        spacing: 5px;
-
-        HorizontalLayout {
-            height: 22px;
-            spacing: 8px;
-
-            Text {
-                text: root.captured ? "CAPTURED PERFORMANCE CELL" : "STEREO BUFFER MONITOR";
-                color: root.captured ? #e5fa36 : #f5f2e9;
-                font-size: 12px;
-                font-weight: 900;
-                vertical-alignment: center;
+        padding: 7px; spacing: 3px;
+        Text { text: root.stage.label; color: root.accent; font-size: 10px; font-weight: 900; overflow: elide; }
+        glyph := Rectangle {
+            min-height: 22px; vertical-stretch: 1; clip: true;
+            Rectangle { y: parent.height / 2; height: 1px; width: parent.width; background: #3d473f; }
+            Path {
+                width: parent.width; height: parent.height;
+                viewbox-width: (self.width - self.stroke-width) / 1px; viewbox-height: (self.height - self.stroke-width) / 1px;
+                commands: root.scale-path(root.stage.path, (self.width - self.stroke-width) / 100px, (self.height - self.stroke-width) / 24px);
+                stroke: root.accent; stroke-width: 1.3px;
+                fill: transparent;
+                opacity: root.stage.suspended ? 0.38 : 0.2 + 0.8 * root.stage.strength;
             }
-
-            Rectangle {
-                width: root.captured ? 138px : 160px;
-                background: root.captured ? #e5fa36 : transparent;
-                border-width: root.captured ? 0px : 1px;
-                border-color: #353531;
-
-                Text {
-                    text: root.mode;
-                    color: root.captured ? #080808 : #e5fa36;
-                    font-size: 10px;
-                    font-weight: 900;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+            if root.stage.cursor: Rectangle {
+                x: root.stage.phase * (parent.width - 3px);
+                width: 3px; height: parent.height;
+                background: root.accent;
+                opacity: root.stage.suspended ? 0.4 : 0.25 + root.stage.strength * 0.75;
+                Rectangle {
+                    x: root.stage.reverse ? 3px : -12px;
+                    width: 12px; height: parent.height;
+                    background: root.accent; opacity: 0.12;
                 }
             }
         }
+        Text { text: root.stage.detail; color: #bec5b9; font-size: 9px; overflow: elide; }
+    }
+    TouchArea { clicked => { root.select-stage(root.stage.pad); } }
+}
 
+component WaveformPanel inherits Rectangle {
+    in property <string> left-path;
+    in property <string> right-path;
+    in property <string> input-left;
+    in property <string> input-right;
+    in property <[StageView]> stages;
+    in property <[StageView]> suspended;
+    in property <int> selected-pad;
+    in property <string> status;
+    callback select-stage(int);
+    pure callback scale-path(string, float, float) -> string;
+    background: #202723;
+    border-radius: 6px;
+    border-width: 1px; border-color: #48533c;
+    VerticalLayout {
+        padding: 10px; spacing: 5px;
+        HorizontalLayout {
+            height: 16px;
+            Text { text: "PERFORMANCE / LIVE CHAIN"; color: #e5fa36; font-size: 11px; font-weight: 900; }
+            Text { text: root.status; color: #a8b3a6; font-size: 9px; horizontal-alignment: right; overflow: elide; }
+        }
         Rectangle {
-            background: #202423;
-            border-width: 1px;
-            border-color: root.captured ? #687300 : #353531;
-            vertical-stretch: 1;
-
+            min-height: root.suspended.length > 0 ? 32px : 45px; vertical-stretch: 1; clip: true;
+            background: #171e1b;
             for beat in 17: Rectangle {
                 x: beat * (parent.width - 1px) / 16;
                 width: 1px; height: parent.height;
-                background: Math.mod(beat, 4) == 0 ? #646961 : #373e38;
+                background: Math.mod(beat, 4) == 0 ? #3f4a3d : #28322a;
             }
-            for line in 4: Rectangle {
-                x: 0px;
-                y: (line + 1) * parent.height / 5;
-                width: parent.width;
-                height: 1px;
-                background: root.captured ? #30351e : #292925;
+            for channel in 2: channel-box := Rectangle {
+                y: channel * parent.height / 2;
+                height: parent.height / 2; width: parent.width;
+                Rectangle { y: parent.height / 2; height: 1px; width: parent.width; background: #3b443d; }
+                Path {
+                    y: 2px; width: parent.width; height: parent.height - 4px;
+                    viewbox-width: (self.width - self.stroke-width) / 1px; viewbox-height: (self.height - self.stroke-width) / 1px;
+                    commands: root.scale-path(channel == 0 ? root.input-left : root.input-right, (self.width - self.stroke-width) / 1000px, (self.height - self.stroke-width) / 32px);
+                    fill: #758477; stroke: #758477; stroke-width: 0.7px; opacity: 0.35;
+                }
+                Path {
+                    y: 2px; width: parent.width; height: parent.height - 4px;
+                    viewbox-width: (self.width - self.stroke-width) / 1px; viewbox-height: (self.height - self.stroke-width) / 1px;
+                    commands: root.scale-path(channel == 0 ? root.left-path : root.right-path, (self.width - self.stroke-width) / 1000px, (self.height - self.stroke-width) / 32px);
+                    fill: #e5fa36; stroke: #e5fa36; stroke-width: 0.8px; opacity: 0.85;
+                }
+                Text { x: 5px; y: 2px; text: channel == 0 ? "L" : "R"; color: #bec5b9; font-size: 8px; }
             }
-
-            Rectangle {
-                y: parent.height / 2;
-                width: parent.width;
-                height: 1px;
-                background: #77746b;
-            }
-
-            if root.captured: Rectangle {
-                x: clamp(root.playhead * parent.width - 6px, 0px, parent.width - self.width);
-                width: 12px;
-                height: parent.height;
-                background: #e5fa36;
-                opacity: 0.13;
-            }
-
-            Rectangle {
-                x: root.playhead * (parent.width - 2px);
-                width: root.captured ? 4px : 2px;
-                height: parent.height;
-                background: #e5fa36;
-            }
-
-            Path {
-                x: 0px;
-                y: 4px;
-                width: parent.width;
-                height: parent.height / 2 - 8px;
-                viewbox-x: 0;
-                viewbox-y: 0;
-                viewbox-width: 1000;
-                viewbox-height: 32;
-                commands: root.left-path;
-                fill: #e5fa36;
-                stroke: #e5fa36;
-                stroke-width: 0.8px;
-                opacity: 0.95;
-            }
-
-            Path {
-                x: 0px;
-                y: parent.height / 2 + 4px;
-                width: parent.width;
-                height: parent.height / 2 - 8px;
-                viewbox-x: 0;
-                viewbox-y: 0;
-                viewbox-width: 1000;
-                viewbox-height: 32;
-                commands: root.right-path;
-                fill: #e5fa36;
-                stroke: #e5fa36;
-                stroke-width: 0.8px;
-                opacity: 0.85;
-            }
-
-            Text {
-                x: 8px;
-                y: 6px;
-                text: "L";
-                color: #e5fa36;
-                font-size: 9px;
-                font-weight: 900;
-            }
-            Text {
-                x: 8px;
-                y: parent.height / 2 + 6px;
-                text: "R";
-                color: #f5f2e9;
-                font-size: 9px;
-                font-weight: 900;
+            Rectangle { x: parent.width - 2px; width: 2px; height: parent.height; background: #e5fa36; }
+        }
+        HorizontalLayout {
+            height: 12px;
+            Text { text: "INPUT / GRAY    OUTPUT / YELLOW"; color: #97a38f; font-size: 8px; }
+            Text { text: root.stages.length == 0 ? "DIRECT SIGNAL" : "PAD ORDER  →  AUDIO OUT"; color: #97a38f; font-size: 8px; horizontal-alignment: right; }
+        }
+        if root.stages.length > 0: HorizontalLayout {
+            height: 68px; spacing: 5px;
+            for stage in root.stages: StageCard {
+                stage: stage; selected: stage.pad == root.selected-pad;
+                select-stage(pad) => { root.select-stage(pad); }
+                scale-path(data, sx, sy) => { root.scale-path(data, sx, sy) }
             }
         }
-
-        Text {
-            height: root.captured ? 18px : 16px;
-            text: root.status;
-            color: #b4b8ac;
-            font-size: root.captured ? 10px : 9px;
-            font-weight: root.captured ? 900 : 700;
-            overflow: elide;
+        if root.stages.length == 0: Rectangle {
+            height: 68px;
+            border-width: 1px; border-color: #354134; border-radius: 4px;
+            Text {
+                text: "HOLD PADS TO BUILD YOUR CHAIN";
+                color: #77876c; font-size: 11px;
+                horizontal-alignment: center; vertical-alignment: center;
+            }
+        }
+        if root.suspended.length > 0: HorizontalLayout {
+            height: 18px; spacing: 4px;
+            Text { text: "PAUSED"; color: #d99b64; font-size: 8px; vertical-alignment: center; }
+            for stage in root.suspended: Rectangle {
+                border-width: 1px; border-color: #806044; border-radius: 2px;
+                Text { text: stage.label; color: #d99b64; font-size: 8px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                TouchArea { clicked => { root.select-stage(stage.pad); } }
+            }
         }
     }
 }
@@ -488,13 +476,15 @@ export component BufferUppercutUi inherits Window {
     in property <string> key-status: "PHYSICAL KEYS · SELECT A PAD TO MAP";
     in property <float> pitch-value: 0.5;
     in property <string> pitch-text: "0 st";
+    in property <[StageView]> chain-stages;
+    in property <[StageView]> suspended-stages;
+    in property <string> input-left: "";
+    in property <string> input-right: "";
+    callback focus-stage(int);
+    pure callback scale-path(string, float, float) -> string;
     in property <string> waveform-left: "";
     in property <string> waveform-right: "";
-    in property <float> waveform-playhead: 1.0;
-    in property <bool> waveform-captured: false;
-    in property <int> waveform-effect-index: 0;
-    in property <string> waveform-mode: "ROLLING / 4 BEATS";
-    in property <string> waveform-status: "STEREO HISTORY";
+    in property <string> waveform-status: "0/6 ACTIVE  ·  INPUT → OUTPUT";
     in property <string> kit-display: "Classic";
 
     callback previous-kit();
@@ -604,25 +594,15 @@ export component BufferUppercutUi inherits Window {
         Rectangle { height: 1px; background: #232726; }
 
         WaveformPanel {
-            min-height: 120px;
+            min-height: 190px;
             vertical-stretch: 2;
-            left-path: root.waveform-left;
-            right-path: root.waveform-right;
-            playhead: root.waveform-playhead;
-            captured: root.waveform-captured;
-            mode: root.waveform-mode;
+            left-path: root.waveform-left; right-path: root.waveform-right;
+            input-left: root.input-left; input-right: root.input-right;
+            stages: root.chain-stages; suspended: root.suspended-stages;
+            selected-pad: root.selected-pad;
             status: root.waveform-status;
-        }
-
-        HorizontalLayout {
-            height: 24px; spacing: 12px;
-            Text { text: "AUDIO IN"; color: #4b514b; font-size: 10px; vertical-alignment: center; }
-            Rectangle { background: transparent; Rectangle { y: 12px; height: 1px; width: parent.width; background: #777d71; } }
-            Text { text: "BUFFER ENGINE"; color: #202523; font-size: 10px; vertical-alignment: center; }
-            Rectangle { background: transparent; Rectangle { y: 12px; height: 1px; width: parent.width; background: #777d71; } }
-            Text { text: "SERIAL EFFECTS  →"; color: #202523; font-size: 10px; vertical-alignment: center; }
-            Rectangle { background: transparent; Rectangle { y: 12px; height: 1px; width: parent.width; background: #777d71; } }
-            Text { text: "AUDIO OUT"; color: #4b514b; font-size: 10px; vertical-alignment: center; }
+            select-stage(pad) => { root.focus-stage(pad); }
+            scale-path(data, sx, sy) => { root.scale-path(data, sx, sy) }
         }
 
         workbench := Rectangle {

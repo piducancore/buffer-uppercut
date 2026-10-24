@@ -191,10 +191,15 @@ BUFFER_UPPERCUT_EDITOR_SIZE=1440x760 cargo truce screenshot --out screenshots/sl
 BUFFER_UPPERCUT_EDITOR_PREVIEW=captured cargo truce screenshot --out screenshots/slint-captured.png --check --debug --scale 1
 ```
 
-The default, minimum, and wide baselines exercise rolling history. The captured
-baseline exercises fixed layout geometry, capture emphasis, and held-slot
-hierarchy. Additional state baselines for direct-key-held, MIDI-held, reverse,
-suspended, and disabled-macro states remain roadmap work.
+The default, minimum, and wide baselines exercise the idle live-chain layout.
+The captured baseline exercises simultaneous Repeat, Reverse, Gate, and Filter
+stages. The suspended baseline exercises six active stages with two paused badges:
+
+```sh
+BUFFER_UPPERCUT_EDITOR_PREVIEW=suspended BUFFER_UPPERCUT_EDITOR_SIZE=920x620 cargo truce screenshot --out screenshots/slint-suspended.png --check --debug --scale 1
+```
+
+Direct-key-held, MIDI-held, and disabled-macro baselines remain roadmap work.
 
 A Vinyl preview exercises all seven macro labels and the final selector choice:
 
@@ -357,13 +362,13 @@ host before making any Linux compatibility claim.
 - Hold two gates, two Filters, two LoFi stages, and two buffer stages in separate
   trials. Confirm repeated exact types stack instead of replacing one another.
 - Press the same configured slots in different orders. Confirm audible stage
-  order remains ascending slot number.
+  order follows press order.
 - Confirm each stage's wet/dry control is local to its chain input.
 - Hold six continuous slots, then press a seventh and eighth. Confirm each new
   request is heard, the oldest admitted active slot suspends, and suspended slots
   remain visibly held.
 - Release capacity in stages. Confirm still-held suspended slots restore
-  most-recently-held first but resume at ascending slot positions.
+  most-recently-held first but resume at their original press positions.
 - Suspend a buffer stage, feed distinctive audio, then restore it. Confirm its
   processor resumes frozen phase/capture state and its lookback includes audio
   recorded while suspended.
@@ -375,8 +380,8 @@ host before making any Linux compatibility claim.
 - Automate buffer-to-buffer and non-buffer-to-buffer type changes. Confirm
   preserved versus cold history behavior.
 - Change project tempo and buffer size while processing.
-- Confirm rolling history, selected captured slice, suspended frozen playhead,
-  reverse playhead, and tape-stop rate displays.
+- Confirm aligned input/output history, independent capture cursors, suspended
+  badges, reverse direction, and tape-stop rate displays.
 
 ### Direct computer keys
 
@@ -462,3 +467,57 @@ A feature is complete when:
 - screenshots or DAW checks cover visible/host-facing changes;
 - authoritative contracts, architecture, roadmap, and ADRs are updated;
 - no build products, installed bundles, or caches are committed.
+
+## Live performance visualization
+
+- Confirm final output over input remains visible when pad selection changes.
+- Combine Repeat, Reverse, Gate, and Filter; confirm four independently labeled
+  stages in press order and distinct buffer rates/durations/directions.
+- Exercise Pitch, LoFi, and Vinyl glyphs; Pitch actions must not add chain stages.
+- Set wet to zero (Gate: depth); confirm subdued glyphs and DRY labels.
+- Hold six, then seven/eight continuous pads. Confirm only six audible-stage cards,
+  separate orange suspended badges, and restoration when capacity is released.
+- Click cards/badges: only selected controls change; no new Trigger gesture.
+- Resize to minimum/default/wide, close/reopen, recall presets, and clear via kits.
+- Measure worst-case audio callback cost with visualization publishing enabled.
+
+Current-build verification (2026-10-23): formatting, all-target/all-feature Clippy,
+107 workspace tests, `rt-paranoid`, CLAP/VST3 builds, and all six screenshot
+baselines pass. CLAP Validator reports 42 passed, zero failures/warnings, and two
+skipped. VST3 pluginval is unavailable locally. These checks do not replace the
+live-host and performance acceptance below.
+
+The automated tests cover output versus input, selection independence, independent
+buffer positions, suspension/restoration, Pitch action exclusion, and exact cached
+peak extraction across circular wrap and partial chunks. The snapshot bridge test
+covers all stage fields and retention of the prior frame during publication.
+
+Preliminary local DSP-only measurements include 30 Hz extraction, 256-frame blocks,
+five runs per configuration, and one through six active processors:
+
+```sh
+cargo run --locked -p buffer-uppercut-dsp --release --example visualization_benchmark
+```
+
+A comparison against the prior implementation measured roughly 0.49–1.70% of one
+core before and 0.61–1.88% after at 48 kHz, and 1.65–6.47% before and 2.02–7.25%
+after at 192 kHz. These short runs were not isolated from other build activity and
+exclude atomic publication and UI costs. Several configurations exceed the 10%
+relative regression threshold; performance sign-off is **not accepted**. Further
+optimization and controlled host measurements remain required. Prepared histories
+and peak caches occupy 72.5 MiB at 48 kHz and 290 MiB at 192 kHz, increases of
+4.5 MiB and 18 MiB respectively; grain/Vinyl delays are outside these totals.
+
+Live CLAP/VST3 chain interaction, resize, recall, and controlled CPU acceptance
+remain open. An isolated REAPER launch could not be targeted by the UI tool, so
+it does not count as host acceptance. Existing user sessions were not changed.
+
+## Press-order listening test
+
+Routing follows observed press order (ADR 0017). Hold LoFi then Filter, release
+both, and hold Filter then LoFi with the same settings. Confirm the stage cards
+reverse and compare the sound. Repeat with a buffer effect, allowing fresh
+lookback to accumulate. Release/repress one held stage to append it. With seven
+held pads, verify suspension and restoration retain the original press position.
+Requests first observed in the same block tie-break by pad number. Listening
+and CPU sign-off remain pending; this is an installed test candidate.

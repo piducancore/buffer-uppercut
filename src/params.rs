@@ -1,3 +1,4 @@
+use buffer_uppercut_dsp::StageVisualization;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU16, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -43,7 +44,10 @@ pub const NUM_MACROS: usize = 7;
 pub const NUM_VISUALIZATION_BINS: usize = 256;
 pub const PAD_PARAMETER_STRIDE: u32 = 9;
 
+#[derive(Clone)]
 pub(crate) struct WaveformSnapshot {
+    pub input_bins: [VisualizationBin; NUM_VISUALIZATION_BINS],
+    pub stages: [StageVisualization; NUM_PADS],
     pub bins: [VisualizationBin; NUM_VISUALIZATION_BINS],
     pub meta: VisualizationMeta,
     sequence: u32,
@@ -52,6 +56,8 @@ pub(crate) struct WaveformSnapshot {
 impl Default for WaveformSnapshot {
     fn default() -> Self {
         Self {
+            input_bins: [VisualizationBin::default(); NUM_VISUALIZATION_BINS],
+            stages: [StageVisualization::default(); NUM_PADS],
             bins: [VisualizationBin::default(); NUM_VISUALIZATION_BINS],
             meta: VisualizationMeta::default(),
             sequence: 0,
@@ -59,7 +65,11 @@ impl Default for WaveformSnapshot {
     }
 }
 
+const STAGE_WORDS: usize = 49;
+
 struct WaveformBridge {
+    input_bins: [[AtomicU32; 4]; NUM_VISUALIZATION_BINS],
+    stages: [[AtomicU32; STAGE_WORDS]; NUM_PADS],
     sequence: AtomicU32,
     bins: [[AtomicU32; 4]; NUM_VISUALIZATION_BINS],
     capture_mode: AtomicBool,
@@ -74,6 +84,8 @@ struct WaveformBridge {
 impl Default for WaveformBridge {
     fn default() -> Self {
         Self {
+            input_bins: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU32::new(0))),
+            stages: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU32::new(0))),
             sequence: AtomicU32::new(0),
             bins: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU32::new(0))),
             capture_mode: AtomicBool::new(false),
@@ -88,8 +100,43 @@ impl Default for WaveformBridge {
 }
 
 impl WaveformBridge {
-    fn publish(&self, bins: &[VisualizationBin; NUM_VISUALIZATION_BINS], meta: VisualizationMeta) {
-        self.sequence.fetch_add(1, Ordering::Release);
+    fn publish(
+        &self,
+        bins: &[VisualizationBin; NUM_VISUALIZATION_BINS],
+        meta: VisualizationMeta,
+        input: &[VisualizationBin; NUM_VISUALIZATION_BINS],
+        stages: &[StageVisualization; NUM_PADS],
+    ) {
+        self.sequence.fetch_add(1, Ordering::AcqRel);
+        for (target, source) in self.input_bins.iter().zip(input) {
+            for (atomic, value) in
+                target
+                    .iter()
+                    .zip([source.min_l, source.max_l, source.min_r, source.max_r])
+            {
+                atomic.store(value.to_bits(), Ordering::Relaxed);
+            }
+        }
+        for (target, source) in self.stages.iter().zip(stages) {
+            let mut words = [0.0_f32; STAGE_WORDS];
+            words[..7].copy_from_slice(&[
+                source.effect as u8 as f32,
+                f32::from(source.active),
+                f32::from(source.suspended),
+                source.phase,
+                source.value,
+                source.wet,
+                source.duration,
+            ]);
+            words[7..14].copy_from_slice(&source.controls);
+            words[14..46].copy_from_slice(&source.trace);
+            words[46] = source.secondary_phase;
+            words[47] = source.activity;
+            words[48] = f32::from(source.chain_position);
+            for (atomic, value) in target.iter().zip(words) {
+                atomic.store(value.to_bits(), Ordering::Relaxed);
+            }
+        }
         for (target, source) in self.bins.iter().zip(bins) {
             target[0].store(source.min_l.to_bits(), Ordering::Relaxed);
             target[1].store(source.max_l.to_bits(), Ordering::Relaxed);
@@ -117,6 +164,7 @@ impl WaveformBridge {
     }
 
     fn read(&self, snapshot: &mut WaveformSnapshot) -> bool {
+        let mut candidate = snapshot.clone();
         for _ in 0..3 {
             let before = self.sequence.load(Ordering::Acquire);
             if before & 1 != 0 {
@@ -125,7 +173,7 @@ impl WaveformBridge {
             if before == snapshot.sequence {
                 return false;
             }
-            for (target, source) in snapshot.bins.iter_mut().zip(&self.bins) {
+            for (target, source) in candidate.input_bins.iter_mut().zip(&self.input_bins) {
                 *target = VisualizationBin {
                     min_l: f32::from_bits(source[0].load(Ordering::Relaxed)),
                     max_l: f32::from_bits(source[1].load(Ordering::Relaxed)),
@@ -133,7 +181,35 @@ impl WaveformBridge {
                     max_r: f32::from_bits(source[3].load(Ordering::Relaxed)),
                 };
             }
-            snapshot.meta = VisualizationMeta {
+            for (target, source) in candidate.stages.iter_mut().zip(&self.stages) {
+                let words = source
+                    .each_ref()
+                    .map(|v| f32::from_bits(v.load(Ordering::Relaxed)));
+                *target = StageVisualization {
+                    effect: DspEffectType::from_index(words[0] as i32),
+                    active: words[1] != 0.0,
+                    suspended: words[2] != 0.0,
+                    phase: words[3],
+                    value: words[4],
+                    wet: words[5],
+                    duration: words[6],
+                    ..StageVisualization::default()
+                };
+                target.controls.copy_from_slice(&words[7..14]);
+                target.trace.copy_from_slice(&words[14..46]);
+                target.secondary_phase = words[46];
+                target.activity = words[47];
+                target.chain_position = words[48] as u8;
+            }
+            for (target, source) in candidate.bins.iter_mut().zip(&self.bins) {
+                *target = VisualizationBin {
+                    min_l: f32::from_bits(source[0].load(Ordering::Relaxed)),
+                    max_l: f32::from_bits(source[1].load(Ordering::Relaxed)),
+                    min_r: f32::from_bits(source[2].load(Ordering::Relaxed)),
+                    max_r: f32::from_bits(source[3].load(Ordering::Relaxed)),
+                };
+            }
+            candidate.meta = VisualizationMeta {
                 mode: if self.capture_mode.load(Ordering::Relaxed) {
                     VisualizationMode::Capture
                 } else {
@@ -153,9 +229,11 @@ impl WaveformBridge {
                 play_rate: f32::from_bits(self.play_rate.load(Ordering::Relaxed)),
                 duration_seconds: f32::from_bits(self.duration_seconds.load(Ordering::Relaxed)),
             };
+            std::sync::atomic::fence(Ordering::Acquire);
             let after = self.sequence.load(Ordering::Acquire);
             if before == after {
-                snapshot.sequence = after;
+                candidate.sequence = after;
+                *snapshot = candidate;
                 return true;
             }
         }
@@ -881,8 +959,10 @@ impl BufferUppercutParams {
         &self,
         bins: &[VisualizationBin; NUM_VISUALIZATION_BINS],
         meta: VisualizationMeta,
+        input: &[VisualizationBin; NUM_VISUALIZATION_BINS],
+        stages: &[StageVisualization; NUM_PADS],
     ) {
-        self.waveform.publish(bins, meta);
+        self.waveform.publish(bins, meta, input, stages);
     }
 
     pub(crate) fn waveform_snapshot(&self, snapshot: &mut WaveformSnapshot) -> bool {
@@ -1036,12 +1116,32 @@ mod tests {
             play_rate: 0.5,
             duration_seconds: 1.25,
         };
-        params.publish_waveform(&bins, meta);
+        let mut stages = [StageVisualization::default(); NUM_PADS];
+        stages[6] = StageVisualization {
+            effect: DspEffectType::Reverse,
+            suspended: true,
+            phase: 0.625,
+            value: -0.5,
+            wet: 0.75,
+            duration: 1.25,
+            controls: [0.2; 7],
+            trace: [0.3; 32],
+            ..StageVisualization::default()
+        };
+        params.publish_waveform(&bins, meta, &bins, &stages);
 
         let mut snapshot = WaveformSnapshot::default();
         assert!(params.waveform_snapshot(&mut snapshot));
         assert_eq!(snapshot.bins, bins);
         assert_eq!(snapshot.meta, meta);
+        assert_eq!(snapshot.input_bins, bins);
+        assert_eq!(snapshot.stages, stages);
+        // An in-progress write must leave the entire previously accepted frame intact.
+        params.waveform.sequence.fetch_add(1, Ordering::AcqRel);
+        params.waveform.bins[0][0].store(99.0_f32.to_bits(), Ordering::Relaxed);
+        assert!(!params.waveform_snapshot(&mut snapshot));
+        assert_eq!(snapshot.bins, bins);
+        assert_eq!(snapshot.stages, stages);
         assert!(!params.waveform_snapshot(&mut snapshot));
         assert_eq!(params.count(), 144);
     }

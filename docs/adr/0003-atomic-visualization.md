@@ -11,6 +11,9 @@ for the UI.
 
 ## Decision
 
+The frame payload is extended by [ADR 0016](0016-live-performance-visualization.md);
+the bounded atomic publication model remains in force.
+
 The DSP fills 256 preallocated stereo min/max bins. The wrapper publishes them
 at 30 Hz through a fixed sequence-checked atomic bridge stored outside the host
 parameter schema. Slint reads a complete snapshot or retains its previous

@@ -1,11 +1,20 @@
 # Roadmap
 
-Last updated: 2026-10-22.
+Last updated: 2026-10-23.
 
 This file tracks current product status. Architectural rationale belongs in
 `adr/`; durable behavior belongs in `CONTRACTS.md`.
 
 ## Current baseline
+
+- Preview 6 adds the live performance waveform and press-order DSP routing.
+  CPU and full listening sign-off remain open; see [release notes](releases/0.1.0-preview.6.md).
+
+- The integrated performance panel shows aligned stereo input/output, all active
+  stages in serial order, independent buffer cursors, effect-state glyphs, and
+  suspended-stage badges. Automated and screenshot checks cover the panel;
+  live-host and CPU acceptance remain open (preliminary regressions exceed the
+  performance threshold); see [visualization acceptance](TESTING.md#live-performance-visualization).
 
 - Beat Repeat Cell includes triplet, dotted, and quintuplet choices on its own
   15-choice scale; see [Cell divisions](CONTRACTS.md#beat-repeat-cell-divisions).
@@ -28,7 +37,7 @@ This file tracks current product status. Architectural rationale belongs in
 - CLAP and VST3 are the supported product formats. The standalone target builds
   as a development host and is excluded from distribution.
 - The framework-neutral `f64` DSP implements every current effect as an
-  independent per-slot processor in a deterministic ascending-slot serial chain.
+  independent per-slot processor in a deterministic press-ordered serial chain.
 - Filter uses one bounded nonlinear resonant state-variable processor with
   Low-pass, Band-pass, and High-pass Mode values, plus drive, envelope response,
   deterministic motion, and saturated feedback.
@@ -36,8 +45,8 @@ This file tracks current product status. Architectural rationale belongs in
   admitted processor, and still-held suspended requests restore
   most-recently-held first.
 - Sixteen independent stereo `f32` slot histories cover at least eight seconds
-  per channel. Configured buffer history records exact chain-position input even
-  while its processor is released or suspended.
+  per channel. Held/suspended buffer histories record chain-position input;
+  unheld histories record final output, preparing the next appended stage.
 - The 16-slot host schema has 144 automatable parameters at stable IDs `1..144`.
   Native `.bupreset` version 3 stores durable slot configuration and a validated
   physical-key map without the transient Active Shift value.
@@ -132,9 +141,9 @@ This file tracks current product status. Architectural rationale belongs in
   modes, including resonance, drive, envelope, motion, automation sweeps, and
   six-stage serial stacking.
 - Run pluginval GUI tests in an interactive desktop session.
-- Add deterministic screenshot states for direct-key-held, MIDI-held, reverse,
-  suspended, and disabled-macro views. Captured performance has a committed
-  baseline.
+- Add deterministic screenshot states for direct-key-held, MIDI-held, and
+  disabled-macro views. Combined captured performance and six-stage suspension
+  have committed baselines.
 
 ## Candidate product work
 
@@ -143,7 +152,7 @@ This file tracks current product status. Architectural rationale belongs in
 - Improved accessibility and general keyboard navigation outside performance
   mode.
 - Additional factory kits and kit-management workflow.
-- Expanded visualization or spectrum analysis.
+- Spectrum analysis.
 - Preset browser and tagging.
 - Add macOS and Windows signing and macOS notarization to the CLAP/VST3 release
   workflow after credentials are available; unsigned previews remain labeled.

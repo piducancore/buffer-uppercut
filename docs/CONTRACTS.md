@@ -250,8 +250,8 @@ tap. No lossless rapid-tap recording/playback claim is made; DAW acceptance and
 ordered within-block event handling remain open work.
 
 When several new continuous requests are observed in one block, admission is
-deterministic. Admission recency affects cap overflow and restoration only; the
-audible chain order is always ascending slot number.
+deterministic. New requests first observed together use ascending pad number as a tie-breaker.
+Otherwise the audible chain follows press order; release/repress appends a stage.
 
 ## Serial processing and admission
 
@@ -260,8 +260,8 @@ Filter, LoFi, and Vinyl. Off and Pitch Down/Up roles are not continuous stages.
 Pitch actions neither enter the audio chain nor consume admission capacity.
 
 Every admitted continuous slot is a distinct serial stage, including repeated
-instances of the same exact effect type. Active stages process in ascending slot
-order, independent of press, suspension, or restoration order. Each stage's dry
+instances of the same exact effect type. Active stages process in original press
+order, preserved across suspension and restoration. Each stage's dry
 reference is the signal entering that stage, and its output becomes the next
 stage's input.
 
@@ -275,7 +275,7 @@ distinct states:
 A new continuous request at capacity suspends the oldest admitted active slot
 and becomes active immediately. When capacity returns, still-held suspended
 slots restore most-recently-held first. Restored stages resume their frozen
-processor state and then process at their ascending slot position.
+processor state and then process at their original press position.
 
 Suspension freezes mutable processor state. It does not freeze configured buffer
 history: the slot's history continues recording and advancing at its chain
@@ -291,9 +291,9 @@ occur in `process`.
 
 Every slot currently configured as Beat Repeat, Reverse, or Tape Stop records
 the signal arriving at its own serial position before its processor is applied.
-Recording continues while the slot is unheld, active, or suspended. This ensures
-that a new press, release/repress, or restored suspended processor has exact
-current lookback for the signal that stage would receive.
+Active and suspended slots record at their original press position. Unheld
+buffer slots record final chain output, ready to append on their next press.
+Previously captured audio is retained when upstream stages change.
 
 Changing one buffer effect type to another preserves the slot's history but
 resets capture/playback processor state. Changing from a non-buffer type to a
@@ -413,13 +413,17 @@ embedded editor UI in this increment.
   ends the gesture only after the last local key/pointer source releases.
 - Direct keys use the configured physical map and honor the target-specific
   default policy above.
-- Pads remain the primary visual surface. Rolling waveform history is secondary.
-- When several held buffer slots qualify for captured visualization, the
-  editor-selected held slot wins even if suspended; otherwise the
-  lowest-numbered active buffer slot wins. If neither exists, rolling history is
-  shown.
-- A suspended buffer's capture/playhead processor state remains frozen in the
-  visualization while its configured history continues recording.
+- The performance panel shows final stereo output over the input reference on
+  the same newest-four-beat timeline, limited by the prepared history length.
+- All active continuous stages appear in press order inside the panel.
+  Each has its own effect glyph and identity; buffer stages have independent
+  sampled capture traces and cursors. Pitch action roles do not appear as stages.
+- Selecting a stage selects its pad controls without triggering audio or changing
+  the main timeline. Suspended stages appear separately in orange; their processor
+  state freezes and resumes according to the admission rules above.
+- Non-buffer glyphs are schematic processor-state illustrations, not measured
+  spectra. Wet/depth scales emphasis, and zero wet is labeled DRY. See
+  [ADR 0016](adr/0016-live-performance-visualization.md).
 - Complete plugin presets are loaded and saved through the host-native preset UI
   exposed by TRUCE wrappers. The editor does not duplicate the DAW's preset
   browser with LOAD/SAVE buttons.
